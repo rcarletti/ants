@@ -37,9 +37,10 @@ struct food_t
 
 struct ant_t
 {
-	int 	x;
-	int 	y;
-	int 	speed;
+	float 	x;
+	float 	y;
+	float 	speed;
+	float	angle;
 };
 
 //---------------------------------------------------------------------------
@@ -51,7 +52,9 @@ void setup(void);
 void process_inputs(void);
 void setup_food(void);
 char get_scan_code(void);
-void read_command(void);
+
+void * ant_task(void *);
+
 
 //---------------------------------------------------------------------------
 //GLOBAL VARIABLES
@@ -77,15 +80,23 @@ pthread_t	tid;
 bool		running = true;
 char		scan;
 
+struct task_par tp;
+
 	setup();
-	
+
+	tp.arg = 0;
+	tp.period = 20;
+	tp.deadline = 20;
+	tp.priority = 10;
+
+	tid = task_create(ant_task, &tp);
+
 	while (running)
 	{
 		process_inputs();
 
 		put_food();
 
-		read_command();
 
 		if (key[KEY_ESC])
 			running = false;
@@ -157,8 +168,31 @@ char get_scan_code(void)
 }
 
 
-void * ant_task(void *p)
+void * ant_task(void * arg)
 {
+struct task_par * tp = (struct task_par *) arg;
+struct ant_t * ant = &ant_list[tp->arg];
 
+	printf("qui1\n");
+
+	set_period(tp);
+
+	printf("qui2\n");
+
+	while(1)
+	{
+		printf("!\n");
+
+		ant->x += 0.1;
+		ant->y = 100;
+
+		scare_mouse();
+		circlefill(buffer, ant->x, ant->y, 5, 12);
+		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
+		unscare_mouse();
+
+		if (deadline_miss(tp)) exit(-1);
+		wait_for_period(tp);
+	}
 } 
 
