@@ -22,10 +22,10 @@ $(MAIN) : $(MAIN).o ptask.o
 	$(CC) $(CFLAGS) -o $(MAIN) $(MAIN).o ptask.o $(CLIBS)
 
 $(MAIN).o: $(MAIN).c
-	$(CC) -c $(MAIN).c
+	$(CC) $(CFLAGS) -c $(MAIN).c
 
 ptask.o: ptask.c
-	$(CC) -c ptask.c
+	$(CC) $(CFLAGS) -c ptask.c
 
 clean:
 	$(RM) $(MAIN) *.o

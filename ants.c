@@ -18,6 +18,9 @@
 #define FOOD_BASE_ODOR			(FOOD_DETECTION_RADIUS * FOOD_DETECTION_RADIUS)
 #define MAX_FOOD_NUM			5
 
+#define ANT_COLOR				12
+#define MAX_ANTS				10
+
 // formula: odor = (base_odor * odor_scale)/ant_distance_from_food^2
 
 
@@ -32,6 +35,13 @@ struct food_t
 	int 	quantity;
 };
 
+struct ant_t
+{
+	int 	x;
+	int 	y;
+	int 	speed;
+};
+
 //---------------------------------------------------------------------------
 //FUNCTION DECLARATIONS
 //---------------------------------------------------------------------------
@@ -40,6 +50,8 @@ void put_food(void);
 void setup(void);
 void process_inputs(void);
 void setup_food(void);
+char get_scan_code(void);
+void read_command(void);
 
 //---------------------------------------------------------------------------
 //GLOBAL VARIABLES
@@ -51,7 +63,9 @@ int		mouse_prev = 0;
 int 			food_x = 0;
 int 			food_y = 0;
 bool 			should_put_food = false;
-struct food_t 	food_list[MAX_FOOD_NUM] = {0};
+struct food_t 	food_list[MAX_FOOD_NUM] = {{0}};
+struct ant_t 	ant_list[MAX_ANTS] = {{0}};
+int 			nAnts = 0;
 
 //---------------------------------------------------------------------------
 //FUNCTION DEFINITIONS
@@ -70,6 +84,8 @@ char		scan;
 		process_inputs();
 
 		put_food();
+
+		read_command();
 
 		if (key[KEY_ESC])
 			running = false;
@@ -131,4 +147,18 @@ void setup(void)
 	clear_bitmap(buffer);
 	clear_to_color(buffer, 0);
 }
+
+char get_scan_code(void)
+{
+	if (keypressed())
+		return readkey() >> 8;
+	else 
+		return 0;
+}
+
+
+void * ant_task(void *p)
+{
+
+} 
 
