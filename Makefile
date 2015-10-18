@@ -10,7 +10,7 @@ CC = gcc
 # CC options
 #---------------------------------------------------
 CFLAGS = -Wall -g
-CLIBS = -lpthread -lrt `allegro-config --libs`
+CLIBS = -lpthread -lrt -lm `allegro-config --libs`
 #---------------------------------------------------
 # Additional programs
 #---------------------------------------------------

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <semaphore.h>
+#include <math.h>
 
 #include "ptask.h"
 
@@ -21,6 +22,14 @@
 
 #define ANT_COLOR				12
 #define MAX_ANTS				10
+#define	DELTA_ANGLE				10		//max angle deviation
+#define	DELTA_SPEED				2		//max_speed deviation
+#define	ANT_PERIOD				0.020
+
+#define NEST_RADIUS				40
+#define NEST_COLOR				13
+
+
 
 // formula: odor = (base_odor * odor_scale)/ant_distance_from_food^2
 
@@ -44,6 +53,12 @@ struct ant_t
 	float	angle;
 };
 
+struct nest_t
+{
+	float	x;
+	float	y;
+};
+
 //---------------------------------------------------------------------------
 //FUNCTION DECLARATIONS
 //---------------------------------------------------------------------------
@@ -58,6 +73,7 @@ void * ant_task(void *);
 void * gfx_task(void *);
 
 float frand(float, float);
+void put_nest(void);
 
 
 //---------------------------------------------------------------------------
@@ -75,6 +91,8 @@ struct food_t 		food_list[MAX_FOOD_NUM] = {{0}};
 struct ant_t 		ant_list[MAX_ANTS] = {{0}};
 int 				nAnts = 0;
 
+struct nest_t		nest;
+
 pthread_t 			tid[MAX_ANTS];
 struct task_par		tp[MAX_ANTS];
 pthread_attr_t		attr[MAX_ANTS];
@@ -83,6 +101,8 @@ bool				running = true;
 
 pthread_t           gfx_tid;
 struct task_par     gfx_tp;
+
+
 
 //---------------------------------------------------------------------------
 //FUNCTION DEFINITIONS
@@ -128,7 +148,7 @@ char	scan;
 			if(nAnts < MAX_ANTS)
 			{
 				tp[nAnts].arg = nAnts;
-				tp[nAnts].period = 20;
+				tp[nAnts].period = ANT_PERIOD;
 				tp[nAnts].deadline = 20;
 				tp[nAnts].priority = 10;
 
@@ -144,6 +164,10 @@ char	scan;
 	}
 			
 }
+
+//-----------------------------------------------------------------------
+//PUT FOOD ON MOUSE CLICK
+//-----------------------------------------------------------------------
 
 
 void put_food(void)
@@ -166,8 +190,14 @@ int 	i;
 
 }
 
+//------------------------------------------------------------------------
+// SETUP THE ENVIRONMENT
+//------------------------------------------------------------------------
+
 void setup(void)
 {
+	//allegro setup
+
 	allegro_init();
 	install_keyboard();
 	install_mouse();
@@ -176,6 +206,8 @@ void setup(void)
 	set_gfx_mode(GFX_AUTODETECT_WINDOWED, WINDOW_WIDTH, WINDOW_HEIGHT,0,0);
 
 	show_mouse(screen);
+
+	//double buffering
 
 	buffer = create_bitmap(WINDOW_WIDTH, WINDOW_HEIGHT);
 	clear_bitmap(buffer);
@@ -190,6 +222,10 @@ void setup(void)
 	gfx_tp.priority = 10;
 
 	gfx_tid = task_create(gfx_task, &gfx_tp);
+
+	//create nest
+
+	put_nest();
 }
 
 char get_scan_code(void)
@@ -200,27 +236,47 @@ char get_scan_code(void)
 		return 0;
 }
 
+//---------------------------------------------------------------------
+// UPDATE ANTS
+//---------------------------------------------------------------------
+
 
 void * ant_task(void * arg)
 {
+int 	da, ds, vx, vy;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
 	ant->x = frand(0, WINDOW_WIDTH); 
 	ant->y = frand(0, WINDOW_HEIGHT); 
-	ant->speed = 0;
-	ant->angle = 0;
+	ant->speed = (rand() + 1) % 4;
+	ant->angle = rand() % 360;
 
 	set_period(tp);
 
 	while(1)
 	{
-		ant->x += 0.1;
+		da = frand(-DELTA_ANGLE, DELTA_ANGLE);
+		ds = frand(-DELTA_SPEED, DELTA_SPEED);
+
+		ant->angle += da;
+		ant->speed += ds;
+
+		vx = ant->speed * cos(ant->angle);
+		vy = ant->speed * sin(ant->angle);
+
+		ant->x += vx * ANT_PERIOD;
+		ant->y += vy * ANT_PERIOD;
 
 		if (deadline_miss(tp)) exit(-1);
 		wait_for_period(tp);
 	}
 } 
+
+
+//----------------------------------------------------------------------
+// UPDATE GRAPHIC
+//----------------------------------------------------------------------
 
 
 void * gfx_task(void * arg)
@@ -237,12 +293,22 @@ int i;
 
 		clear_to_color(buffer, 0);
 
+		//draw ants on buffer
+
 		for (i = 0; i < nAnts; i++)
 			circlefill(buffer, ant_list[i].x, ant_list[i].y, 5, 12);
+
+		//draw food on buffer
 
 		for (i = 0; i < MAX_FOOD_NUM; i++)
 			if (food_list[i].quantity > 0)
 				circlefill(buffer, food_list[i].x, food_list[i].y, FOOD_BASE_RADIUS, 10);
+
+		//draw nest
+
+		circlefill(buffer, nest.x, nest.y, NEST_RADIUS, 10);
+
+		//put buffer on the screen
 
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
@@ -263,4 +329,14 @@ float 	r;
 	
 	r = rand()/(float) RAND_MAX;
 	return xmi + (xma - xmi) * r;
+}
+
+//---------------------------------------------------------------------
+// puts ants nest on the environment
+//---------------------------------------------------------------------
+
+void put_nest(void)
+{
+	nest.x = frand(NEST_RADIUS, WINDOW_HEIGHT - NEST_RADIUS);
+	nest.y = frand(NEST_RADIUS, WINDOW_WIDTH - NEST_RADIUS);
 }
