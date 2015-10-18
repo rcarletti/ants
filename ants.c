@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <semaphore.h>
 
 #include "ptask.h"
 
@@ -54,6 +55,9 @@ void setup_food(void);
 char get_scan_code(void);
 
 void * ant_task(void *);
+void * gfx_task(void *);
+
+float frand(float, float);
 
 
 //---------------------------------------------------------------------------
@@ -63,12 +67,22 @@ void * ant_task(void *);
 BITMAP *buffer; 			//buffer for double buffering
 int		mouse_prev = 0;
 
-int 			food_x = 0;
-int 			food_y = 0;
-bool 			should_put_food = false;
-struct food_t 	food_list[MAX_FOOD_NUM] = {{0}};
-struct ant_t 	ant_list[MAX_ANTS] = {{0}};
-int 			nAnts = 0;
+int 				food_x = 0;
+int 				food_y = 0;
+bool 				should_put_food = false;
+struct food_t 		food_list[MAX_FOOD_NUM] = {{0}};
+
+struct ant_t 		ant_list[MAX_ANTS] = {{0}};
+int 				nAnts = 0;
+
+pthread_t 			tid[MAX_ANTS];
+struct task_par		tp[MAX_ANTS];
+pthread_attr_t		attr[MAX_ANTS];
+
+bool				running = true;
+
+pthread_t           gfx_tid;
+struct task_par     gfx_tp;
 
 //---------------------------------------------------------------------------
 //FUNCTION DEFINITIONS
@@ -76,30 +90,13 @@ int 			nAnts = 0;
 
 int main(int argc, char * argv[])
 {
-pthread_t	tid;
-bool		running = true;
-char		scan;
-
-struct task_par tp;
-
 	setup();
-
-	tp.arg = 0;
-	tp.period = 20;
-	tp.deadline = 20;
-	tp.priority = 10;
-
-	tid = task_create(ant_task, &tp);
 
 	while (running)
 	{
 		process_inputs();
 
 		put_food();
-
-
-		if (key[KEY_ESC])
-			running = false;
 	}
 	
 	allegro_exit();
@@ -109,12 +106,43 @@ struct task_par tp;
 
 void process_inputs(void)
 {
+char	scan;
+
 	// mouse
 	should_put_food = (!(mouse_prev & 1) && (mouse_b & 1));
 	food_x = mouse_x;
 	food_y = mouse_y;
 
 	mouse_prev = mouse_b;
+
+	// keyboard
+	scan = get_scan_code();
+
+	switch(scan)
+	{
+		case KEY_ESC:
+			running = false;
+			break;
+		case KEY_SPACE:
+		{
+			if(nAnts < MAX_ANTS)
+			{
+				tp[nAnts].arg = nAnts;
+				tp[nAnts].period = 20;
+				tp[nAnts].deadline = 20;
+				tp[nAnts].priority = 10;
+
+				tid[nAnts] = task_create(ant_task, &tp[nAnts]);
+
+				nAnts++;
+			}	
+			break;
+		}
+
+		default: 
+			break;
+	}
+			
 }
 
 
@@ -123,12 +151,7 @@ void put_food(void)
 int 	i;
 
 	if (should_put_food)
-	{	
-		scare_mouse();
-		circlefill(buffer, food_x, food_y, FOOD_BASE_RADIUS, 10);
-		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
-		unscare_mouse();
-
+	{
 		for (i = 0; i < MAX_FOOD_NUM; i++)
 		{
 			if (food_list[i].quantity == 0)
@@ -157,6 +180,16 @@ void setup(void)
 	buffer = create_bitmap(WINDOW_WIDTH, WINDOW_HEIGHT);
 	clear_bitmap(buffer);
 	clear_to_color(buffer, 0);
+
+	srand(time(NULL));
+
+	// create graphics task
+	gfx_tp.arg = 0;
+	gfx_tp.period = 20;
+	gfx_tp.deadline = 50;
+	gfx_tp.priority = 10;
+
+	gfx_tid = task_create(gfx_task, &gfx_tp);
 }
 
 char get_scan_code(void)
@@ -173,26 +206,61 @@ void * ant_task(void * arg)
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
-	printf("qui1\n");
+	ant->x = frand(0, WINDOW_WIDTH); 
+	ant->y = frand(0, WINDOW_HEIGHT); 
+	ant->speed = 0;
+	ant->angle = 0;
 
 	set_period(tp);
 
-	printf("qui2\n");
-
 	while(1)
 	{
-		printf("!\n");
-
 		ant->x += 0.1;
-		ant->y = 100;
-
-		scare_mouse();
-		circlefill(buffer, ant->x, ant->y, 5, 12);
-		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
-		unscare_mouse();
 
 		if (deadline_miss(tp)) exit(-1);
 		wait_for_period(tp);
 	}
 } 
 
+
+void * gfx_task(void * arg)
+{
+struct task_par *tp = (struct task_par *) arg;
+
+int i;
+
+	set_period(tp);
+
+	while(1)
+	{
+		scare_mouse();
+
+		clear_to_color(buffer, 0);
+
+		for (i = 0; i < nAnts; i++)
+			circlefill(buffer, ant_list[i].x, ant_list[i].y, 5, 12);
+
+		for (i = 0; i < MAX_FOOD_NUM; i++)
+			if (food_list[i].quantity > 0)
+				circlefill(buffer, food_list[i].x, food_list[i].y, FOOD_BASE_RADIUS, 10);
+
+		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
+
+		unscare_mouse();
+
+		if (deadline_miss(tp)) exit(-1);
+		wait_for_period(tp);
+	}
+}
+
+//--------------------------------------------------------------------
+// returns a random float in [xmi, xma)
+//--------------------------------------------------------------------
+
+float frand(float xmi, float xma)
+{
+float 	r;
+	
+	r = rand()/(float) RAND_MAX;
+	return xmi + (xma - xmi) * r;
+}
