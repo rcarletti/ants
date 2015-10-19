@@ -20,16 +20,15 @@
 #define FOOD_BASE_ODOR			(FOOD_DETECTION_RADIUS * FOOD_DETECTION_RADIUS)
 #define MAX_FOOD_NUM			5
 
-#define ANT_COLOR				12
 #define MAX_ANTS				10
 #define	DELTA_ANGLE				10		//max angle deviation
 #define	DELTA_SPEED				0.1		//max_speed deviation
 #define	ANT_PERIOD				0.02
-#define ANT_SPEED				30
+#define ANT_SPEED				20
 #define ANT_RADIUS				5
 
 #define NEST_RADIUS				40
-#define NEST_COLOR				13
+#define NEST_COLOR				make_color()
 
 
 
@@ -206,7 +205,10 @@ void setup(void)
 	install_keyboard();
 	install_mouse();
 
-	set_color_depth(8);
+	set_color_depth(24);
+
+	set_color_conversion(COLORCONV_8_TO_24);
+
 	set_gfx_mode(GFX_AUTODETECT_WINDOWED, WINDOW_WIDTH, WINDOW_HEIGHT,0,0);
 
 	show_mouse(screen);
@@ -288,6 +290,16 @@ void * gfx_task(void * arg)
 struct task_par *tp = (struct task_par *) arg;
 
 int i;
+int ant_color, food_color, nest_color;
+BITMAP * ground;
+
+	ground = load_bitmap("ground.bmp", NULL);
+
+	if(ground == NULL)
+		{
+			printf("errore ground \n");
+			exit(1);
+		}
 
 	set_period(tp);
 
@@ -297,22 +309,36 @@ int i;
 
 		clear_to_color(buffer, 0);
 
-		//draw nest
+		if(ground == NULL)
+		{
+			printf("errore ground \n");
+			exit(1);
+		}
 
-		circlefill(buffer, nest.x, nest.y, NEST_RADIUS, 10);
+		blit(ground, screen, 0, 0, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+
+		//draw nest
+		nest_color = makecol(241, 8, 238);
+
+		circlefill(buffer, nest.x, nest.y, NEST_RADIUS, nest_color);
 
 		//draw ants on buffer
 
+		ant_color = makecol(241, 8, 46);
+
 		for (i = 0; i < nAnts; i++)
-			circlefill(buffer, ant_list[i].x, ant_list[i].y, ANT_RADIUS, 12);
+			circlefill(buffer, ant_list[i].x, ant_list[i].y, ANT_RADIUS, ant_color);
 
 		//draw food on buffer
 
+		food_color = makecol(8,139,241);
+
 		for (i = 0; i < MAX_FOOD_NUM; i++)
 			if (food_list[i].quantity > 0)
-				circlefill(buffer, food_list[i].x, food_list[i].y, FOOD_BASE_RADIUS, 10);
+				circlefill(buffer, food_list[i].x, food_list[i].y, FOOD_BASE_RADIUS, food_color);
 
 		//put buffer on the screen
+		
 
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
@@ -342,8 +368,8 @@ float 	r;
 
 void put_nest(void)
 {
-	nest.x = frand(NEST_RADIUS * 2, WINDOW_HEIGHT - NEST_RADIUS);
-	nest.y = frand(NEST_RADIUS * 2, WINDOW_WIDTH - NEST_RADIUS);
+	nest.x = frand(NEST_RADIUS * 2, WINDOW_WIDTH - NEST_RADIUS * 2);
+	nest.y = frand(NEST_RADIUS * 2, WINDOW_HEIGHT - NEST_RADIUS * 2);
 }
 
 void bounce(struct ant_t * ant)
