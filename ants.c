@@ -22,10 +22,11 @@
 
 #define ANT_COLOR				12
 #define MAX_ANTS				10
-#define	DELTA_ANGLE				20		//max angle deviation
+#define	DELTA_ANGLE				10		//max angle deviation
 #define	DELTA_SPEED				0.1		//max_speed deviation
 #define	ANT_PERIOD				0.02
 #define ANT_SPEED				30
+#define ANT_RADIUS				5
 
 #define NEST_RADIUS				40
 #define NEST_COLOR				13
@@ -75,6 +76,8 @@ void * gfx_task(void *);
 
 float frand(float, float);
 void put_nest(void);
+
+void bounce(struct ant_t *);
 
 
 //---------------------------------------------------------------------------
@@ -267,6 +270,8 @@ struct ant_t * ant = &ant_list[tp->arg];
 		ant->x += vx * ANT_PERIOD;
 		ant->y += vy * ANT_PERIOD;
 
+		bounce(ant);
+
 		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
 	}
@@ -299,7 +304,7 @@ int i;
 		//draw ants on buffer
 
 		for (i = 0; i < nAnts; i++)
-			circlefill(buffer, ant_list[i].x, ant_list[i].y, 5, 12);
+			circlefill(buffer, ant_list[i].x, ant_list[i].y, ANT_RADIUS, 12);
 
 		//draw food on buffer
 
@@ -327,7 +332,6 @@ float frand(float xmi, float xma)
 float 	r;
 	
 	r = (float)rand()/(float)RAND_MAX;
-	printf("%f", r);
 	return xmi + (xma - xmi) * r;
 }
 
@@ -340,4 +344,29 @@ void put_nest(void)
 {
 	nest.x = frand(NEST_RADIUS * 2, WINDOW_HEIGHT - NEST_RADIUS);
 	nest.y = frand(NEST_RADIUS * 2, WINDOW_WIDTH - NEST_RADIUS);
+}
+
+void bounce(struct ant_t * ant)
+{
+	if(ant->x <= ANT_RADIUS)
+	{
+		ant->angle += (90 * (M_PI/180));
+	}
+
+	if(ant->x > (WINDOW_WIDTH - ANT_RADIUS))
+	{
+		ant->angle -= (90 * (M_PI/180));
+	}
+
+	if(ant->y > (WINDOW_HEIGHT - ANT_RADIUS))
+	{
+		ant->angle += (90 * (M_PI/180));
+	}
+
+	if(ant->y < ANT_RADIUS)
+	{
+		ant->angle -= (90 * (M_PI/180));
+	}
+
+
 }
