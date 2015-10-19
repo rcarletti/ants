@@ -22,9 +22,10 @@
 
 #define ANT_COLOR				12
 #define MAX_ANTS				10
-#define	DELTA_ANGLE				10		//max angle deviation
-#define	DELTA_SPEED				2		//max_speed deviation
-#define	ANT_PERIOD				0.020
+#define	DELTA_ANGLE				20		//max angle deviation
+#define	DELTA_SPEED				0.1		//max_speed deviation
+#define	ANT_PERIOD				0.02
+#define ANT_SPEED				30
 
 #define NEST_RADIUS				40
 #define NEST_COLOR				13
@@ -148,8 +149,8 @@ char	scan;
 			if(nAnts < MAX_ANTS)
 			{
 				tp[nAnts].arg = nAnts;
-				tp[nAnts].period = ANT_PERIOD;
-				tp[nAnts].deadline = 20;
+				tp[nAnts].period = 20;
+				tp[nAnts].deadline = 60;
 				tp[nAnts].priority = 10;
 
 				tid[nAnts] = task_create(ant_task, &tp[nAnts]);
@@ -243,24 +244,22 @@ char get_scan_code(void)
 
 void * ant_task(void * arg)
 {
-int 	da, ds, vx, vy;
+int 	da, vx, vy;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
-	ant->x = frand(0, WINDOW_WIDTH); 
-	ant->y = frand(0, WINDOW_HEIGHT); 
-	ant->speed = (rand() + 1) % 4;
-	ant->angle = rand() % 360;
+	ant->x = nest.x; 
+	ant->y = nest.y; 
+	ant->speed = ANT_SPEED;
+	ant->angle = (frand(0,360)) * M_PI/180;
 
 	set_period(tp);
 
 	while(1)
 	{
-		da = frand(-DELTA_ANGLE, DELTA_ANGLE);
-		ds = frand(-DELTA_SPEED, DELTA_SPEED);
+		da = frand(-DELTA_ANGLE, DELTA_ANGLE) * M_PI/180;
 
 		ant->angle += da;
-		ant->speed += ds;
 
 		vx = ant->speed * cos(ant->angle);
 		vy = ant->speed * sin(ant->angle);
@@ -268,7 +267,7 @@ struct ant_t * ant = &ant_list[tp->arg];
 		ant->x += vx * ANT_PERIOD;
 		ant->y += vy * ANT_PERIOD;
 
-		if (deadline_miss(tp)) exit(-1);
+		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
 	}
 } 
@@ -293,6 +292,10 @@ int i;
 
 		clear_to_color(buffer, 0);
 
+		//draw nest
+
+		circlefill(buffer, nest.x, nest.y, NEST_RADIUS, 10);
+
 		//draw ants on buffer
 
 		for (i = 0; i < nAnts; i++)
@@ -303,10 +306,6 @@ int i;
 		for (i = 0; i < MAX_FOOD_NUM; i++)
 			if (food_list[i].quantity > 0)
 				circlefill(buffer, food_list[i].x, food_list[i].y, FOOD_BASE_RADIUS, 10);
-
-		//draw nest
-
-		circlefill(buffer, nest.x, nest.y, NEST_RADIUS, 10);
 
 		//put buffer on the screen
 
@@ -327,9 +326,11 @@ float frand(float xmi, float xma)
 {
 float 	r;
 	
-	r = rand()/(float) RAND_MAX;
+	r = (float)rand()/(float)RAND_MAX;
+	printf("%f", r);
 	return xmi + (xma - xmi) * r;
 }
+
 
 //---------------------------------------------------------------------
 // puts ants nest on the environment
@@ -337,6 +338,6 @@ float 	r;
 
 void put_nest(void)
 {
-	nest.x = frand(NEST_RADIUS, WINDOW_HEIGHT - NEST_RADIUS);
-	nest.y = frand(NEST_RADIUS, WINDOW_WIDTH - NEST_RADIUS);
+	nest.x = frand(NEST_RADIUS * 2, WINDOW_HEIGHT - NEST_RADIUS);
+	nest.y = frand(NEST_RADIUS * 2, WINDOW_WIDTH - NEST_RADIUS);
 }
