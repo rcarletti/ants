@@ -244,7 +244,7 @@ char get_scan_code(void)
 
 void * ant_task(void * arg)
 {
-int 	da, vx, vy;
+float	da, vx, vy;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
