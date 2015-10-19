@@ -253,8 +253,9 @@ float	da, vx, vy;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
-	ant->x = nest.x; 
-	ant->y = nest.y; 
+
+	ant->x = nest.x + 40; 
+	ant->y = nest.y + 40; 
 	ant->speed = ANT_SPEED;
 	ant->angle = (frand(0,360)) * M_PI/180;
 
@@ -289,17 +290,33 @@ void * gfx_task(void * arg)
 {
 struct task_par *tp = (struct task_par *) arg;
 
-int i;
-int ant_color, food_color, nest_color;
+int i, food_color;
 BITMAP * ground;
+BITMAP * ant;
+BITMAP * nest_image;
+float angle;
 
-	ground = load_bitmap("ground.bmp", NULL);
-
+	ground = load_bitmap("ground2.bmp", NULL);
 	if(ground == NULL)
 		{
 			printf("errore ground \n");
 			exit(1);
 		}
+
+	ant = load_bitmap("ant6.bmp", NULL);
+	if(ant == NULL)
+	{
+		printf("errore ant \n");
+		exit(1);
+	}
+
+	nest_image = load_bitmap("nest3.bmp", NULL);
+	if(nest_image == NULL)
+	{
+		printf("errore nest \n");
+		exit(1);
+	}
+
 
 	set_period(tp);
 
@@ -309,26 +326,24 @@ BITMAP * ground;
 
 		clear_to_color(buffer, 0);
 
-		if(ground == NULL)
-		{
-			printf("errore ground \n");
-			exit(1);
-		}
-
-		blit(ground, screen, 0, 0, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+		draw_sprite(buffer, ground, 0, 0);
 
 		//draw nest
-		nest_color = makecol(241, 8, 238);
 
-		circlefill(buffer, nest.x, nest.y, NEST_RADIUS, nest_color);
+		draw_sprite(buffer, nest_image, nest.x, nest.y);
 
 		//draw ants on buffer
 
-		ant_color = makecol(241, 8, 46);
 
 		for (i = 0; i < nAnts; i++)
-			circlefill(buffer, ant_list[i].x, ant_list[i].y, ANT_RADIUS, ant_color);
+		{
 
+			angle = ((ant_list[i].angle) * 0.7);  //PERCHÈ ANGLE È SEMPRE 0??
+			printf("%f\n", angle);
+
+			//draw_sprite(buffer, ant, ant_list[i].x, ant_list[i].y);
+			rotate_sprite(buffer,ant,ant_list[i].x, ant_list[i].y, ftofix(angle));
+		}
 		//draw food on buffer
 
 		food_color = makecol(8,139,241);
