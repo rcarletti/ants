@@ -12,23 +12,25 @@
 //GLOBAL CONSTANTS
 //---------------------------------------------------------------------------
 
-#define WINDOW_HEIGHT		600
-#define WINDOW_WIDTH		800
+#define WINDOW_HEIGHT		768
+#define WINDOW_WIDTH		1024
+#define BACKGROUND_WIDTH	800
+#define BACKGROUND_HEIGHT	600
 
-#define FOOD_BASE_RADIUS		20
+#define FOOD_BASE_RADIUS		30
 #define FOOD_DETECTION_RADIUS	(FOOD_BASE_RADIUS + 20)
 #define FOOD_BASE_ODOR			(FOOD_DETECTION_RADIUS * FOOD_DETECTION_RADIUS)
 #define MAX_FOOD_NUM			5
 
 #define MAX_ANTS				10
-#define	DELTA_ANGLE				10		//max angle deviation
+#define	DELTA_ANGLE				5		//max angle deviation
 #define	DELTA_SPEED				0.1		//max_speed deviation
 #define	ANT_PERIOD				0.02
 #define ANT_SPEED				20
-#define ANT_RADIUS				5
+#define ANT_RADIUS				8
 
 #define NEST_RADIUS				40
-#define NEST_COLOR				make_color()
+
 
 
 
@@ -41,8 +43,8 @@
 
 struct food_t
 {
-	int 	x;
-	int 	y;
+	int 	x;						//center coord
+	int 	y;						//center coord
 	int 	quantity;
 };
 
@@ -52,6 +54,7 @@ struct ant_t
 	float 	y;
 	float 	speed;
 	float	angle;
+	bool 	has_food;
 };
 
 struct nest_t
@@ -78,6 +81,12 @@ void put_nest(void);
 
 void bounce(struct ant_t *);
 
+float deg_to_rad(float);
+float rad_to_deg(float);
+
+void check_for_food(struct ant_t *);
+float distance(struct ant_t *,struct food_t);
+
 
 //---------------------------------------------------------------------------
 //GLOBAL VARIABLES
@@ -90,6 +99,7 @@ int 				food_x = 0;
 int 				food_y = 0;
 bool 				should_put_food = false;
 struct food_t 		food_list[MAX_FOOD_NUM] = {{0}};
+int 				n_food = 0;
 
 struct ant_t 		ant_list[MAX_ANTS] = {{0}};
 int 				nAnts = 0;
@@ -186,6 +196,7 @@ int 	i;
 				food_list[i].x = food_x;
 				food_list[i].y = food_y;
 				food_list[i].quantity = FOOD_BASE_RADIUS / 2;
+				n_food++;
 				break;
 			}
 		}
@@ -223,7 +234,7 @@ void setup(void)
 
 	// create graphics task
 	gfx_tp.arg = 0;
-	gfx_tp.period = 20;
+	gfx_tp.period = 80;
 	gfx_tp.deadline = 50;
 	gfx_tp.priority = 10;
 
@@ -257,23 +268,36 @@ struct ant_t * ant = &ant_list[tp->arg];
 	ant->x = nest.x + 40; 
 	ant->y = nest.y + 40; 
 	ant->speed = ANT_SPEED;
-	ant->angle = (frand(0,360)) * M_PI/180;
+	ant->angle = deg_to_rad(frand(0,360));
+	ant->has_food = false;
 
 	set_period(tp);
 
 	while(1)
 	{
-		da = frand(-DELTA_ANGLE, DELTA_ANGLE) * M_PI/180;
+		check_for_food(ant);
 
-		ant->angle += da;
+		if(!ant->has_food)
+		{
+			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
 
-		vx = ant->speed * cos(ant->angle);
-		vy = ant->speed * sin(ant->angle);
+			ant->angle += da;
 
-		ant->x += vx * ANT_PERIOD;
-		ant->y += vy * ANT_PERIOD;
+			vx = ant->speed * cos(ant->angle);
+			vy = ant->speed * sin(ant->angle);
 
-		bounce(ant);
+			ant->x += vx * ANT_PERIOD;
+			ant->y += vy * ANT_PERIOD;
+
+			bounce(ant);
+
+		}
+
+		else if(ant->has_food)
+		{
+			ant->x += 1;
+			
+		}
 
 		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
@@ -290,10 +314,11 @@ void * gfx_task(void * arg)
 {
 struct task_par *tp = (struct task_par *) arg;
 
-int i, food_color;
+int i;
 BITMAP * ground;
 BITMAP * ant;
 BITMAP * nest_image;
+BITMAP * food;
 float angle;
 
 	ground = load_bitmap("ground2.bmp", NULL);
@@ -303,7 +328,7 @@ float angle;
 			exit(1);
 		}
 
-	ant = load_bitmap("ant6.bmp", NULL);
+	ant = load_bitmap("ant2.bmp", NULL);
 	if(ant == NULL)
 	{
 		printf("errore ant \n");
@@ -317,6 +342,13 @@ float angle;
 		exit(1);
 	}
 
+	food = load_bitmap("food.bmp", NULL);
+	if(food == NULL)
+	{
+		printf("errore food \n");
+		exit(1);
+	}
+
 
 	set_period(tp);
 
@@ -326,31 +358,22 @@ float angle;
 
 		clear_to_color(buffer, 0);
 
-		draw_sprite(buffer, ground, 0, 0);
+		draw_sprite(buffer, ground, 0, WINDOW_HEIGHT - BACKGROUND_HEIGHT);						//draw ground
 
-		//draw nest
-
-		draw_sprite(buffer, nest_image, nest.x, nest.y);
-
-		//draw ants on buffer
-
+		draw_sprite(buffer, nest_image, nest.x, nest.y);										//draw nest on buffer
 
 		for (i = 0; i < nAnts; i++)
 		{
 
-			angle = ((ant_list[i].angle) * 0.7);  //PERCHÈ ANGLE È SEMPRE 0??
-			printf("%f\n", angle);
+			angle = ((rad_to_deg(ant_list[i].angle) * 256 / 360) + 32);							//converting degrees in allegro-degrees
 
-			//draw_sprite(buffer, ant, ant_list[i].x, ant_list[i].y);
-			rotate_sprite(buffer,ant,ant_list[i].x, ant_list[i].y, ftofix(angle));
+			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle) + 32);			//draw ants
 		}
 		//draw food on buffer
 
-		food_color = makecol(8,139,241);
-
 		for (i = 0; i < MAX_FOOD_NUM; i++)
 			if (food_list[i].quantity > 0)
-				circlefill(buffer, food_list[i].x, food_list[i].y, FOOD_BASE_RADIUS, food_color);
+				draw_sprite(buffer, food,food_list[i].x - FOOD_BASE_RADIUS, food_list[i].y - FOOD_BASE_RADIUS);
 
 		//put buffer on the screen
 		
@@ -383,31 +406,68 @@ float 	r;
 
 void put_nest(void)
 {
-	nest.x = frand(NEST_RADIUS * 2, WINDOW_WIDTH - NEST_RADIUS * 2);
-	nest.y = frand(NEST_RADIUS * 2, WINDOW_HEIGHT - NEST_RADIUS * 2);
+
+	nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
+	nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),WINDOW_HEIGHT - (NEST_RADIUS * 2));
 }
 
 void bounce(struct ant_t * ant)
 {
-	if(ant->x <= ANT_RADIUS)
+	if(ant->x <= ANT_RADIUS)									//left side
 	{
-		ant->angle += (90 * (M_PI/180));
+		ant->angle +=deg_to_rad(90);
 	}
 
-	if(ant->x > (WINDOW_WIDTH - ANT_RADIUS))
+	if(ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))				//right side
 	{
-		ant->angle -= (90 * (M_PI/180));
+		ant->angle -= deg_to_rad(90);
 	}
 
-	if(ant->y > (WINDOW_HEIGHT - ANT_RADIUS))
+	if(ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))			//up side?????
 	{
-		ant->angle += (90 * (M_PI/180));
+		ant->angle += deg_to_rad(90);
 	}
 
-	if(ant->y < ANT_RADIUS)
+	if(ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)					//bottom side
 	{
-		ant->angle -= (90 * (M_PI/180));
+		ant->angle -= deg_to_rad(90);
 	}
 
 
+}
+
+float deg_to_rad(float angle)
+{
+	angle = angle * M_PI/180;
+	return angle;
+}
+
+float rad_to_deg(float angle)
+{
+	angle = angle * 180 / M_PI;
+	return angle;
+}
+
+
+void check_for_food(struct ant_t * ant)
+{
+int i;
+
+	for(i = 0; i < n_food; i++)
+	{
+		if(distance(ant, food_list[i]) < FOOD_BASE_RADIUS)
+			ant->has_food = true;
+		
+		break;
+	}
+}
+
+float distance(struct ant_t * ant,struct food_t food )
+{
+int distance_x, distance_y, distance;
+
+	distance_x = ((ant->x - food.x) * (ant->x - food.x));
+	distance_y = ((ant->y - food.y) * (ant->y - food.y));
+	distance = sqrt(distance_y + distance_x);
+	return distance;
 }
