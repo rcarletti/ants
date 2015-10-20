@@ -85,7 +85,10 @@ float deg_to_rad(float);
 float rad_to_deg(float);
 
 void check_for_food(struct ant_t *);
-float distance(struct ant_t *,struct food_t);
+float distance(struct ant_t *, float, float);
+
+void head_to_the_nest(struct ant_t *);
+void check_nest(struct ant_t *);
 
 
 //---------------------------------------------------------------------------
@@ -265,8 +268,8 @@ struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
 
-	ant->x = nest.x + 40; 
-	ant->y = nest.y + 40; 
+	ant->x = nest.x; 
+	ant->y = nest.y; 
 	ant->speed = ANT_SPEED;
 	ant->angle = deg_to_rad(frand(0,360));
 	ant->has_food = false;
@@ -281,23 +284,23 @@ struct ant_t * ant = &ant_list[tp->arg];
 		{
 			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
 
-			ant->angle += da;
-
-			vx = ant->speed * cos(ant->angle);
-			vy = ant->speed * sin(ant->angle);
-
-			ant->x += vx * ANT_PERIOD;
-			ant->y += vy * ANT_PERIOD;
-
-			bounce(ant);
-
+			ant->angle += da;	
 		}
 
 		else if(ant->has_food)
 		{
-			ant->x += 1;
-			
+			head_to_the_nest(ant);
 		}
+
+		vx = ant->speed * cos(ant->angle);
+		vy = ant->speed * sin(ant->angle);
+
+		ant->x += vx * ANT_PERIOD;
+		ant->y += vy * ANT_PERIOD;
+
+		bounce(ant);
+		check_nest(ant);
+
 
 		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
@@ -360,7 +363,7 @@ float angle;
 
 		draw_sprite(buffer, ground, 0, WINDOW_HEIGHT - BACKGROUND_HEIGHT);						//draw ground
 
-		draw_sprite(buffer, nest_image, nest.x, nest.y);										//draw nest
+		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);			//draw nest
 
 		//draw food on buffer
 
@@ -441,11 +444,19 @@ void bounce(struct ant_t * ant)
 
 }
 
+//---------------------------------------------------------------------
+// converte i gradi in radianti
+//---------------------------------------------------------------------
+
 float deg_to_rad(float angle)
 {
 	angle = angle * M_PI/180;
 	return angle;
 }
+
+//---------------------------------------------------------------------
+// converte i radianti in gradi
+//---------------------------------------------------------------------
 
 float rad_to_deg(float angle)
 {
@@ -465,19 +476,49 @@ int i;
 
 	for(i = 0; i < n_food; i++)
 	{
-		if(distance(ant, food_list[i]) < FOOD_BASE_RADIUS)
-			ant->has_food = true;
-		
-		break;
+		if(distance(ant, food_list[i].x, food_list[i].y) < FOOD_BASE_RADIUS)
+			ant->has_food = true;	
 	}
 }
 
-float distance(struct ant_t * ant,struct food_t food)
+//---------------------------------------------------------------------
+// calcola la distanza fra la formica e il cibo
+//---------------------------------------------------------------------
+
+
+float distance(struct ant_t * ant, float x, float y)
 {
 int distance_x, distance_y, distance;
 
-	distance_x = ((ant->x - food.x) * (ant->x - food.x));
-	distance_y = ((ant->y - food.y) * (ant->y - food.y));
+	distance_x = ((ant->x - x) * (ant->x - x));
+	distance_y = ((ant->y - y) * (ant->y - y));
 	distance = sqrt(distance_y + distance_x);
 	return distance;
+}
+
+void head_to_the_nest(struct ant_t * ant)
+{
+float x, y, alpha;
+
+	if(ant->x < nest.x)
+	{
+		x = (nest.x - ant->x);
+		y = (nest.y - ant->y);
+		alpha = atan(y/x) ;
+		ant->angle = alpha;
+	}
+
+	else
+	{
+		x = (nest.x - ant->x);
+		y = (nest.y - ant->y);
+		alpha = atan(x/y);
+		ant->angle = alpha;
+	}
+}
+
+void check_nest(struct ant_t * ant)
+{
+	if(distance(ant, nest.x, nest.y) < 2)
+			ant->has_food = false;	
 }
