@@ -360,24 +360,24 @@ float angle;
 
 		draw_sprite(buffer, ground, 0, WINDOW_HEIGHT - BACKGROUND_HEIGHT);						//draw ground
 
-		draw_sprite(buffer, nest_image, nest.x, nest.y);										//draw nest on buffer
+		draw_sprite(buffer, nest_image, nest.x, nest.y);										//draw nest
 
-		for (i = 0; i < nAnts; i++)
-		{
-
-			angle = ((rad_to_deg(ant_list[i].angle) * 256 / 360) + 32);							//converting degrees in allegro-degrees
-
-			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle) + 32);			//draw ants
-		}
 		//draw food on buffer
 
 		for (i = 0; i < MAX_FOOD_NUM; i++)
 			if (food_list[i].quantity > 0)
-				draw_sprite(buffer, food,food_list[i].x - FOOD_BASE_RADIUS, food_list[i].y - FOOD_BASE_RADIUS);
+				draw_sprite(buffer, food,food_list[i].x - FOOD_BASE_RADIUS, food_list[i].y - FOOD_BASE_RADIUS);		//drawing food
+									
 
-		//put buffer on the screen
+		for (i = 0; i < nAnts; i++)
+		{
+			angle = ((rad_to_deg(ant_list[i].angle) * 256 / 360) + 32);							//converting degrees in allegro-degrees
+
+			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle) + 32);			//draw ants
+		}
 		
-
+		//put buffer on the screen
+	
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
 		unscare_mouse();
@@ -410,6 +410,11 @@ void put_nest(void)
 	nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
 	nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),WINDOW_HEIGHT - (NEST_RADIUS * 2));
 }
+
+//---------------------------------------------------------------------
+// controlla se la formica raggiunge la fine dello sfondo e la fa
+// tornare indietro
+//---------------------------------------------------------------------
 
 void bounce(struct ant_t * ant)
 {
@@ -449,6 +454,11 @@ float rad_to_deg(float angle)
 }
 
 
+//---------------------------------------------------------------------
+// controlla se la formica ha trovato cibo
+//---------------------------------------------------------------------
+
+
 void check_for_food(struct ant_t * ant)
 {
 int i;
@@ -462,7 +472,7 @@ int i;
 	}
 }
 
-float distance(struct ant_t * ant,struct food_t food )
+float distance(struct ant_t * ant,struct food_t food)
 {
 int distance_x, distance_y, distance;
 
