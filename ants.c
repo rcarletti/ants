@@ -17,12 +17,13 @@
 #define BACKGROUND_WIDTH	800
 #define BACKGROUND_HEIGHT	600
 
-#define FOOD_BASE_RADIUS		30
+#define FOOD_BASE_RADIUS		40										//grandezza base dell'immagine della pila di cibo
 #define FOOD_DETECTION_RADIUS	(FOOD_BASE_RADIUS + 20)
 #define FOOD_BASE_ODOR			(FOOD_DETECTION_RADIUS * FOOD_DETECTION_RADIUS)
-#define MAX_FOOD_NUM			5
+#define MAX_FOOD_NUM			5										//numero massimo di pile di cibo
+#define MAX_FOOD_QUANTITY		10										//numero massimo di cibo per pila	
 
-#define MAX_ANTS				10
+#define MAX_ANTS				10		//max numero di formiche
 #define	DELTA_ANGLE				5		//max angle deviation
 #define	DELTA_SPEED				0.1		//max_speed deviation
 #define	ANT_PERIOD				0.02
@@ -46,6 +47,8 @@ struct food_t
 	int 	x;						//center coord
 	int 	y;						//center coord
 	int 	quantity;
+	int 	radius;
+
 };
 
 struct ant_t
@@ -68,10 +71,13 @@ struct nest_t
 //---------------------------------------------------------------------------
 
 void put_food(void);
+void draw_food(void);
 void setup(void);
 void process_inputs(void);
 void setup_food(void);
 char get_scan_code(void);
+
+void draw_ants(void);
 
 void * ant_task(void *);
 void * gfx_task(void *);
@@ -96,12 +102,12 @@ void check_nest(struct ant_t *);
 //---------------------------------------------------------------------------
 
 BITMAP *buffer; 			//buffer for double buffering
-int		mouse_prev = 0;
+int		mouse_prev = 0;		//previous mouse value
 
-int 				food_x = 0;
+int 				food_x = 0;					//food center coord
 int 				food_y = 0;
 bool 				should_put_food = false;
-struct food_t 		food_list[MAX_FOOD_NUM] = {{0}};
+struct food_t 		food_list[MAX_FOOD_NUM] = {{0}};		
 int 				n_food = 0;
 
 struct ant_t 		ant_list[MAX_ANTS] = {{0}};
@@ -198,7 +204,8 @@ int 	i;
 			{
 				food_list[i].x = food_x;
 				food_list[i].y = food_y;
-				food_list[i].quantity = FOOD_BASE_RADIUS / 2;
+				food_list[i].quantity = MAX_FOOD_QUANTITY;
+				food_list[i].radius = FOOD_BASE_RADIUS;
 				n_food++;
 				break;
 			}
@@ -317,12 +324,11 @@ void * gfx_task(void * arg)
 {
 struct task_par *tp = (struct task_par *) arg;
 
-int i;
 BITMAP * ground;
-BITMAP * ant;
+
 BITMAP * nest_image;
-BITMAP * food;
-float angle;
+
+
 
 	ground = load_bitmap("ground2.bmp", NULL);
 	if(ground == NULL)
@@ -331,12 +337,7 @@ float angle;
 			exit(1);
 		}
 
-	ant = load_bitmap("ant2.bmp", NULL);
-	if(ant == NULL)
-	{
-		printf("errore ant \n");
-		exit(1);
-	}
+
 
 	nest_image = load_bitmap("nest3.bmp", NULL);
 	if(nest_image == NULL)
@@ -345,13 +346,7 @@ float angle;
 		exit(1);
 	}
 
-	food = load_bitmap("food.bmp", NULL);
-	if(food == NULL)
-	{
-		printf("errore food \n");
-		exit(1);
-	}
-
+	
 
 	set_period(tp);
 
@@ -366,18 +361,12 @@ float angle;
 		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);			//draw nest
 
 		//draw food on buffer
+		draw_food();
 
-		for (i = 0; i < MAX_FOOD_NUM; i++)
-			if (food_list[i].quantity > 0)
-				draw_sprite(buffer, food,food_list[i].x - FOOD_BASE_RADIUS, food_list[i].y - FOOD_BASE_RADIUS);		//drawing food
+		//drawing food
 									
 
-		for (i = 0; i < nAnts; i++)
-		{
-			angle = ((rad_to_deg(ant_list[i].angle) * 256 / 360) + 32);							//converting degrees in allegro-degrees
-
-			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle) + 32);			//draw ants
-		}
+		draw_ants();
 		
 		//put buffer on the screen
 	
@@ -477,7 +466,10 @@ int i;
 	for(i = 0; i < n_food; i++)
 	{
 		if(distance(ant, food_list[i].x, food_list[i].y) < FOOD_BASE_RADIUS)
-			ant->has_food = true;	
+		{
+			ant->has_food = true;
+			food_list[i].quantity--;
+		}
 	}
 }
 
@@ -500,25 +492,63 @@ void head_to_the_nest(struct ant_t * ant)
 {
 float x, y, alpha;
 
-	if(ant->x < nest.x)
-	{
 		x = (nest.x - ant->x);
 		y = (nest.y - ant->y);
-		alpha = atan(y/x) ;
+		alpha = atan2(y,x) ;
 		ant->angle = alpha;
-	}
-
-	else
-	{
-		x = (nest.x - ant->x);
-		y = (nest.y - ant->y);
-		alpha = atan(x/y);
-		ant->angle = alpha;
-	}
 }
 
 void check_nest(struct ant_t * ant)
 {
 	if(distance(ant, nest.x, nest.y) < 2)
 			ant->has_food = false;	
+}
+
+void draw_food(void)
+{
+int i;
+
+	BITMAP * food;
+
+	food = load_bitmap("sugar.bmp", NULL);
+	if(food == NULL)
+	{
+		printf("errore food \n");
+		exit(1);
+	}
+
+	for (i = 0; i < MAX_FOOD_NUM; i++)
+			if (food_list[i].quantity > 0){
+				stretch_sprite(buffer, food, 
+				food_list[i].x - FOOD_BASE_RADIUS ,
+				food_list[i].y - FOOD_BASE_RADIUS,
+				food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2 ,
+				food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2);	
+			break;
+			}
+			
+				
+}
+
+void draw_ants(void)
+{
+int i;
+BITMAP * ant;
+float angle;
+
+	ant = load_bitmap("ant2.bmp", NULL);
+
+	if(ant == NULL)
+	{
+		printf("errore ant \n");
+		exit(1);
+	}
+
+	for (i = 0; i < nAnts; i++)
+		{
+			angle = ((rad_to_deg(ant_list[i].angle) * 256 / 360) + 32);				//converting degrees in allegro-degrees
+
+			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle) + 32);			
+		}
+
 }
