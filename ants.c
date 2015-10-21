@@ -16,6 +16,7 @@
 #define WINDOW_WIDTH		1024
 #define BACKGROUND_WIDTH	800
 #define BACKGROUND_HEIGHT	600
+#define DIAGONAL 			(int)sqrt((BACKGROUND_HEIGHT * BACKGROUND_HEIGHT) + (BACKGROUND_WIDTH * BACKGROUND_WIDTH))
 
 #define FOOD_BASE_RADIUS		40										//grandezza base dell'immagine della pila di cibo
 #define FOOD_DETECTION_RADIUS	(FOOD_BASE_RADIUS + 20)
@@ -27,7 +28,7 @@
 #define	DELTA_ANGLE				5		//max angle deviation
 #define	DELTA_SPEED				0.1		//max_speed deviation
 #define	ANT_PERIOD				0.02
-#define ANT_SPEED				20
+#define ANT_SPEED				20 
 #define ANT_RADIUS				8
 
 #define NEST_RADIUS				40
@@ -47,7 +48,7 @@ struct food_t
 	int 	x;						//center coord
 	int 	y;						//center coord
 	int 	quantity;
-	int 	radius;
+	float 	radius;
 
 };
 
@@ -65,6 +66,21 @@ struct nest_t
 	float	x;
 	float	y;
 };
+
+struct pheromone_t
+{
+	int intensity;
+	float x;
+	float y;
+};
+
+struct trail_t
+{
+	struct pheromone_t trail[50];
+	float food_x;						//coordinate del mucchio di cibo corrisponenti a questa scia
+	float food_y;
+};
+
 
 //---------------------------------------------------------------------------
 //FUNCTION DECLARATIONS
@@ -90,11 +106,13 @@ void bounce(struct ant_t *);
 float deg_to_rad(float);
 float rad_to_deg(float);
 
-void check_for_food(struct ant_t *);
+struct food_t check_for_food(struct ant_t *);
 float distance(struct ant_t *, float, float);
 
 void head_to_the_nest(struct ant_t *);
 void check_nest(struct ant_t *);
+
+void release_pheromone(struct ant_t *, int);
 
 
 //---------------------------------------------------------------------------
@@ -123,6 +141,8 @@ bool				running = true;
 
 pthread_t           gfx_tid;
 struct task_par     gfx_tp;
+struct trail_t 		trail_list[MAX_FOOD_NUM];
+
 
 
 
@@ -273,6 +293,9 @@ void * ant_task(void * arg)
 float	da, vx, vy;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
+struct food_t app;
+int i;
+int trail_index = -1;											//indice della traccia che sta lasciando la formica
 
 
 	ant->x = nest.x; 
@@ -285,13 +308,31 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 	while(1)
 	{
-		check_for_food(ant);
-
-		if(!ant->has_food)
+		if (!ant->has_food)
 		{
 			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-
 			ant->angle += da;	
+
+			app = check_for_food(ant);
+			if (app.x != -1 && app.y != -1)				//se la formica ha trovato cibo
+			{
+				for(i = 0; i < MAX_FOOD_NUM; i++)			//scorro l'array di scie per trovare quella giusta
+				{
+					if ((trail_list[i].food_x == app.x) && (trail_list[i].food_y == app.y))			//se le coordinate corrispondono ad una traccia già esistente
+						trail_index = i;															//salvo la traccia
+				}
+
+				if (trail_index == -1)																//se non è stata trovata
+				{
+					for (i = 0; i < MAX_FOOD_NUM; i++)												//cerco un indice libero
+						if (trail_list[i].food_x == -1)
+						{
+							trail_index = i;														//salvo nella traccia le coordinate del cibo
+							trail_list[i].food_x = app.x;
+							trail_list[i].food_y = app.y;
+						}
+				}			
+			}
 		}
 
 		else if(ant->has_food)
@@ -328,8 +369,6 @@ BITMAP * ground;
 
 BITMAP * nest_image;
 
-
-
 	ground = load_bitmap("ground2.bmp", NULL);
 	if(ground == NULL)
 		{
@@ -337,16 +376,12 @@ BITMAP * nest_image;
 			exit(1);
 		}
 
-
-
 	nest_image = load_bitmap("nest3.bmp", NULL);
 	if(nest_image == NULL)
 	{
 		printf("errore nest \n");
 		exit(1);
 	}
-
-	
 
 	set_period(tp);
 
@@ -365,7 +400,6 @@ BITMAP * nest_image;
 
 		//drawing food
 									
-
 		draw_ants();
 		
 		//put buffer on the screen
@@ -385,8 +419,7 @@ BITMAP * nest_image;
 
 float frand(float xmi, float xma)
 {
-float 	r;
-	
+float 	r;	
 	r = (float)rand()/(float)RAND_MAX;
 	return xmi + (xma - xmi) * r;
 }
@@ -398,7 +431,6 @@ float 	r;
 
 void put_nest(void)
 {
-
 	nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
 	nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),WINDOW_HEIGHT - (NEST_RADIUS * 2));
 }
@@ -410,22 +442,22 @@ void put_nest(void)
 
 void bounce(struct ant_t * ant)
 {
-	if(ant->x <= ANT_RADIUS)									//left side
+	if (ant->x <= ANT_RADIUS)									//left side
 	{
 		ant->angle +=deg_to_rad(90);
 	}
 
-	if(ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))				//right side
+	if (ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))				//right side
 	{
 		ant->angle -= deg_to_rad(90);
 	}
 
-	if(ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))			//up side?????
+	if (ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))			//up side?????
 	{
 		ant->angle += deg_to_rad(90);
 	}
 
-	if(ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)					//bottom side
+	if (ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)					//bottom side
 	{
 		ant->angle -= deg_to_rad(90);
 	}
@@ -459,22 +491,29 @@ float rad_to_deg(float angle)
 //---------------------------------------------------------------------
 
 
-void check_for_food(struct ant_t * ant)
+struct food_t check_for_food(struct ant_t * ant)
 {
 int i;
+struct food_t app;
+	app.x = -1;
+	app.y = -1;
 
-	for(i = 0; i < n_food; i++)
+	for (i = 0; i < n_food; i++)
 	{
-		if(distance(ant, food_list[i].x, food_list[i].y) < FOOD_BASE_RADIUS)
+		if (distance(ant, food_list[i].x, food_list[i].y) < FOOD_BASE_RADIUS)
 		{
 			ant->has_food = true;
 			food_list[i].quantity--;
-		}
+			if (food_list[i].quantity == 0)
+				food_list[i].quantity = 0;
+			return food_list[i];						//ritorno le coordinate del cibo che ho trovato
+		}	 
 	}
+	return app;											//altrimenti ritorno coordinate fasulle
 }
 
 //---------------------------------------------------------------------
-// calcola la distanza fra la formica e il cibo
+//
 //---------------------------------------------------------------------
 
 
@@ -500,31 +539,29 @@ float x, y, alpha;
 
 void check_nest(struct ant_t * ant)
 {
-	if(distance(ant, nest.x, nest.y) < 2)
+	if (distance(ant, nest.x, nest.y) < 2)
 			ant->has_food = false;	
 }
 
 void draw_food(void)
 {
 int i;
+float width, heigth;
 
 	BITMAP * food;
 
 	food = load_bitmap("sugar.bmp", NULL);
-	if(food == NULL)
+	if (food == NULL)
 	{
 		printf("errore food \n");
 		exit(1);
 	}
 
 	for (i = 0; i < MAX_FOOD_NUM; i++)
-			if (food_list[i].quantity > 0){
-				stretch_sprite(buffer, food, 
-				food_list[i].x - FOOD_BASE_RADIUS ,
-				food_list[i].y - FOOD_BASE_RADIUS,
-				food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2 ,
-				food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2);	
-			break;
+			if (food_list[i].quantity > 0)
+			{
+				heigth = width = (float)food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2;
+				stretch_sprite(buffer, food, food_list[i].x - FOOD_BASE_RADIUS , food_list[i].y - FOOD_BASE_RADIUS, width, heigth);
 			}
 			
 				
@@ -538,7 +575,7 @@ float angle;
 
 	ant = load_bitmap("ant2.bmp", NULL);
 
-	if(ant == NULL)
+	if (ant == NULL)
 	{
 		printf("errore ant \n");
 		exit(1);
@@ -550,5 +587,9 @@ float angle;
 
 			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle) + 32);			
 		}
+}
+
+void release_pheromone(struct ant_t * ant, int trail_num)
+{
 
 }
