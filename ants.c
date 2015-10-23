@@ -12,10 +12,10 @@
 //GLOBAL CONSTANTS
 //---------------------------------------------------------------------------
 
-#define WINDOW_HEIGHT		768
-#define WINDOW_WIDTH		1024
-#define BACKGROUND_WIDTH	800
-#define BACKGROUND_HEIGHT	600
+#define WINDOW_HEIGHT			768
+#define WINDOW_WIDTH			1024
+#define BACKGROUND_WIDTH		800
+#define BACKGROUND_HEIGHT		600
 
 #define FOOD_BASE_RADIUS		40										//grandezza base dell'immagine della pila di cibo
 #define FOOD_DETECTION_RADIUS	(FOOD_BASE_RADIUS + 20)
@@ -23,7 +23,7 @@
 #define MAX_FOOD_NUM			5										//numero massimo di pile di cibo
 #define MAX_FOOD_QUANTITY		10										//numero massimo di cibo per pila	
 
-#define MAX_ANTS				10		//max numero di formiche
+#define MAX_ANTS				20		//max numero di formiche
 #define	DELTA_ANGLE				5		//max angle deviation
 #define	DELTA_SPEED				0.1		//max_speed deviation
 #define	ANT_PERIOD				0.02
@@ -31,6 +31,11 @@
 #define ANT_RADIUS				8
 
 #define NEST_RADIUS				40
+
+#define PHEROMONE_RADIUS		20													//raggio dei feromoni
+#define	MAX_PHEROMONE_INTENSITY	10													//intensità dei feromoni
+#define X_NUM_CELL				(int)BACKGROUND_WIDTH / MAX_PHEROMONE_INTENSITY		//numero di celle sull'asse x
+#define	Y_NUM_CELL				(int)BACKGROUND_HEIGHT / MAX_PHEROMONE_INTENSITY	//numero di celle sull'asse y
 
 
 
@@ -66,6 +71,12 @@ struct nest_t
 	float	y;
 };
 
+struct cell_t 
+{
+	float x;			//center of the cell
+	float y;
+	int odor_intensity;
+};
 //---------------------------------------------------------------------------
 //FUNCTION DECLARATIONS
 //---------------------------------------------------------------------------
@@ -81,6 +92,7 @@ void draw_ants(void);
 
 void * ant_task(void *);
 void * gfx_task(void *);
+void * pheromone_task(void *);
 
 float frand(float, float);
 void put_nest(void);
@@ -95,6 +107,12 @@ float distance(struct ant_t *, float, float);
 
 void head_to_the_nest(struct ant_t *);
 void check_nest(struct ant_t *);
+
+void setup_grid(void);
+
+void release_pheromone(struct ant_t *);
+
+void draw_pheromone(void);
 
 
 //---------------------------------------------------------------------------
@@ -124,6 +142,10 @@ bool				running = true;
 pthread_t           gfx_tid;
 struct task_par     gfx_tp;
 
+pthread_t           ph_tid;
+struct task_par     ph_tp;
+
+struct cell_t 		grid[X_NUM_CELL][Y_NUM_CELL];			//griglia dello sfondo
 
 
 //---------------------------------------------------------------------------
@@ -151,9 +173,14 @@ void process_inputs(void)
 char	scan;
 
 	// mouse
-	should_put_food = (!(mouse_prev & 1) && (mouse_b & 1));
+
 	food_x = mouse_x;
 	food_y = mouse_y;
+	if(food_x < (BACKGROUND_WIDTH - FOOD_BASE_RADIUS) && 
+		food_y > (WINDOW_HEIGHT - BACKGROUND_HEIGHT + FOOD_BASE_RADIUS) &&
+		food_x > FOOD_BASE_RADIUS && 
+		food_y < (WINDOW_HEIGHT - FOOD_BASE_RADIUS))
+			should_put_food = (!(mouse_prev & 1) && (mouse_b & 1));
 
 	mouse_prev = mouse_b;
 
@@ -167,7 +194,7 @@ char	scan;
 			break;
 		case KEY_SPACE:
 		{
-			if(nAnts < MAX_ANTS)
+			if (nAnts < MAX_ANTS)
 			{
 				tp[nAnts].arg = nAnts;
 				tp[nAnts].period = 20;
@@ -180,11 +207,9 @@ char	scan;
 			}	
 			break;
 		}
-
 		default: 
 			break;
-	}
-			
+	}			
 }
 
 //-----------------------------------------------------------------------
@@ -240,17 +265,25 @@ void setup(void)
 	clear_bitmap(buffer);
 	clear_to_color(buffer, 0);
 
+	setup_grid();
+
 	srand(time(NULL));
 
 	// create graphics task
 	gfx_tp.arg = 0;
 	gfx_tp.period = 80;
-	gfx_tp.deadline = 50;
+	gfx_tp.deadline = 80;
 	gfx_tp.priority = 10;
 
 	gfx_tid = task_create(gfx_task, &gfx_tp);
 
-	//create nest
+	ph_tp.arg = 0;
+	ph_tp.period = 800;
+	ph_tp.deadline = 800;
+	ph_tp.priority = 10;
+
+	ph_tid = task_create(pheromone_task, &ph_tp);
+
 
 	put_nest();
 }
@@ -285,18 +318,18 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 	while(1)
 	{
-		check_for_food(ant);
-
-		if(!ant->has_food)
+		if (!ant->has_food)
 		{
 			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-
 			ant->angle += da;	
+
+			check_for_food(ant);
 		}
 
-		else if(ant->has_food)
+		else if (ant->has_food)
 		{
 			head_to_the_nest(ant);
+			release_pheromone(ant);
 		}
 
 		vx = ant->speed * cos(ant->angle);
@@ -307,7 +340,6 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 		bounce(ant);
 		check_nest(ant);
-
 
 		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
@@ -328,8 +360,6 @@ BITMAP * ground;
 
 BITMAP * nest_image;
 
-
-
 	ground = load_bitmap("ground2.bmp", NULL);
 	if(ground == NULL)
 		{
@@ -337,16 +367,12 @@ BITMAP * nest_image;
 			exit(1);
 		}
 
-
-
 	nest_image = load_bitmap("nest3.bmp", NULL);
 	if(nest_image == NULL)
 	{
 		printf("errore nest \n");
 		exit(1);
 	}
-
-	
 
 	set_period(tp);
 
@@ -360,21 +386,17 @@ BITMAP * nest_image;
 
 		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);			//draw nest
 
-		//draw food on buffer
 		draw_food();
 
-		//drawing food
-									
+		draw_pheromone();
 
 		draw_ants();
-		
-		//put buffer on the screen
 	
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
 		unscare_mouse();
 
-		if (deadline_miss(tp)) exit(-1);
+		if (deadline_miss(tp)) printf("deadline miss gfx\n");
 		wait_for_period(tp);
 	}
 }
@@ -518,13 +540,13 @@ int i;
 	}
 
 	for (i = 0; i < MAX_FOOD_NUM; i++)
-			if (food_list[i].quantity > 0){
+			if (food_list[i].quantity > 0)
+			{
 				stretch_sprite(buffer, food, 
-				food_list[i].x - FOOD_BASE_RADIUS ,
+				food_list[i].x - FOOD_BASE_RADIUS,
 				food_list[i].y - FOOD_BASE_RADIUS,
-				food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2 ,
-				food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2);	
-			break;
+				(float)food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2,
+				(float)food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2);	
 			}
 			
 				
@@ -536,7 +558,7 @@ int i;
 BITMAP * ant;
 float angle;
 
-	ant = load_bitmap("ant2.bmp", NULL);
+	ant = load_bitmap("ant.bmp", NULL);
 
 	if(ant == NULL)
 	{
@@ -546,9 +568,65 @@ float angle;
 
 	for (i = 0; i < nAnts; i++)
 		{
-			angle = ((rad_to_deg(ant_list[i].angle) * 256 / 360) + 32);				//converting degrees in allegro-degrees
+			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));				//converting degrees in allegro-degrees
 
-			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle) + 32);			
+			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle));			
 		}
+}
+
+void setup_grid()
+{
+int i, j;
+
+	for (i = 0; i < X_NUM_CELL; i++)
+		for (j = 0; j < Y_NUM_CELL; j++)
+		{
+			grid[i][j].x = i * PHEROMONE_RADIUS + PHEROMONE_RADIUS;
+			grid[i][j].y = j * PHEROMONE_RADIUS + PHEROMONE_RADIUS;
+			grid[i][j].odor_intensity = 0;
+		}
+}
+
+void release_pheromone(struct ant_t * ant)
+{
+int x, y;
+	
+	x = ant->x / PHEROMONE_RADIUS;
+	y = ant->y / PHEROMONE_RADIUS;
+	grid[x][y].odor_intensity = MAX_PHEROMONE_INTENSITY;
+}
+
+void draw_pheromone(void)
+{
+int i, j;
+BITMAP * trail;
+int yellow = makecol(238,240,39);
+
+	trail = load_bitmap("scia.bmp", NULL);
+
+	for (i = 0; i < X_NUM_CELL; i++)
+		for (j = 0; j < Y_NUM_CELL; j++)
+			if (grid[i][j].odor_intensity > 0)
+				stretch_sprite(buffer, trail, grid[i-1][j-1].x, grid[i-1][j-1].y, PHEROMONE_RADIUS * 2, PHEROMONE_RADIUS * 2);
+
+}
+
+void * pheromone_task(void * arg)
+{
+int i, j;
+struct task_par *tp = (struct task_par *) arg;
+
+	set_period(tp);
+
+	while(1)
+	{
+		for (i = 0; i < X_NUM_CELL; i++)
+			for (j = 0; j < Y_NUM_CELL; j++)
+				if (grid[i][j].odor_intensity > 0)
+					grid[i][j].odor_intensity--;
+
+	if (deadline_miss(tp)) printf("deadline miss gfx\n");
+		wait_for_period(tp);
+	}
 
 }
