@@ -34,7 +34,7 @@
 #define NEST_RADIUS				40
 
 #define MAX_PHEROMONE_INTENSITY 10
-#define PHEROMONE_INTENSITY     1
+#define PHEROMONE_INTENSITY     0.1
 #define PHEROMONE_TASK_PERIOD   20000
 
 #define CELL_SIDE				10
@@ -64,7 +64,7 @@ struct ant_t
 	float 	x, y;
 	float 	speed;
 	float	angle;
-	int     pheromone_intensity;
+	float   pheromone_intensity;
 
 	bool 	found_food, carrying_food, following_trail;
 	float   food_x, food_y;
@@ -80,7 +80,7 @@ struct cell_t
 {
 	float x;			//center of the cell
 	float y;
-	int odor_intensity;
+	float odor_intensity;
 };
 
 //---------------------------------------------------------------------------
@@ -109,10 +109,11 @@ float deg_to_rad(float);
 float rad_to_deg(float);
 
 bool look_for_food(struct ant_t *);
+bool look_for_trail(struct ant_t *);
 float distance(struct ant_t *, float, float);
 
 void head_towards(struct ant_t *, float, float);
-void check_nest(struct ant_t *);
+bool check_nest(struct ant_t *);
 
 void setup_grid(void);
 
@@ -321,36 +322,92 @@ struct ant_t * ant = &ant_list[tp->arg];
 	ant->speed = ANT_SPEED;
 	ant->angle = deg_to_rad(frand(0,360));
 	ant->pheromone_intensity = PHEROMONE_INTENSITY;
-	ant->found_food = false;
-	ant->carrying_food = false;
+
 	ant->following_trail = false;
+	ant->carrying_food = false;
 
 	set_period(tp);
 
 	while(1)
 	{
-		if (!ant->found_food)
-		{
-			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-			ant->angle += da;
+	bool at_home = check_nest(ant);
 
-			look_for_food(ant);
-			//if (!look_for_food(ant))
-			//	follow_trail(ant);
+		// se non ho cibo e non sono su una scia
+		if (!at_home && !ant->carrying_food && !ant->following_trail)
+		{
+			// vaga a caso e cerca una scia
+			follow_trail(ant);
 
 			if (!ant->following_trail)
 			{
+				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+				ant->angle += da;
+			}
+
+			// e rilascia feromone per trovare la scia
+			release_pheromone(ant);
+
+			// nel frattempo controlla se c'è cibo
+			if (look_for_food(ant))
+			{
+				// girati
+				ant->angle += M_PI;
+
+				// segui la scia verso casa
+				follow_trail(ant);
 			}
 		}
-		else
+		
+		// se non ho cibo e sono su una scia
+		if (!ant->carrying_food && ant->following_trail)
 		{
-			if (ant->carrying_food)
-				head_towards(ant, nest.x, nest.y);
-			else
-				head_towards(ant, ant->food_x, ant->food_y);
+			// segui la scia
+			follow_trail(ant);
 
+			// e rilascia feromone per rinforzare la scia
+			release_pheromone(ant);
 		}
 
+		// se arrivo a casa senza cibo
+		if (at_home && !ant->carrying_food && ant->following_trail)
+		{
+			// girati
+			ant->angle += M_PI;
+
+			// segui la scia verso il cibo
+			follow_trail(ant);
+		}
+
+		// se sto trasportando cibo
+		if (ant->carrying_food)
+		{
+			// segui la scia verso casa
+			follow_trail(ant);
+			
+			if (!ant->following_trail)
+			{
+				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+				ant->angle += da;
+			}
+
+			// rilascia più feromone
+			release_pheromone(ant);
+		}
+
+		// se arrivo a casa con del cibo
+		if (at_home && ant->carrying_food)
+		{
+			// deposita il cibo
+			ant->carrying_food = false;
+
+			// girati
+			ant->angle += M_PI;
+
+			// segui la scia verso il cibo
+			follow_trail(ant);			
+		}
+
+		// aggiorna velocità e posizione
 		vx = ant->speed * cos(ant->angle);
 		vy = ant->speed * sin(ant->angle);
 
@@ -358,22 +415,6 @@ struct ant_t * ant = &ant_list[tp->arg];
 		ant->y += vy * ANT_PERIOD;
 
 		bounce(ant);
-
-		release_pheromone(ant);
-		
-		if (ant->found_food)
-		{
-			if (ant->carrying_food)
-				check_nest(ant);
-			else
-			{
-				bool found = look_for_food(ant);
-				float dist = distance(ant, ant->food_x, ant->food_y);
-
-				if (dist < 1.0 && !found)
-					ant->found_food = false;
-			}
-		}
 
 		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
@@ -453,9 +494,12 @@ float 	r;
 
 void put_nest(void)
 {
-	nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
-	nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),
-				   WINDOW_HEIGHT - (NEST_RADIUS * 2));
+	nest.x = BACKGROUND_WIDTH / 2;
+	nest.y = (WINDOW_HEIGHT - BACKGROUND_HEIGHT) + BACKGROUND_HEIGHT / 2;
+
+	//nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
+	//nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),
+	//			   WINDOW_HEIGHT - (NEST_RADIUS * 2));
 }
 
 //---------------------------------------------------------------------
@@ -526,11 +570,8 @@ int i;
 			dist < (food_list[i].quantity * FOOD_SCALE / 2)
 		   )
 		{
-			ant->found_food = true;
+			ant->following_trail = true;
 			ant->carrying_food = true;
-			ant->following_trail = false;
-
-			ant->pheromone_intensity++;
 
 			ant->food_x = food_list[i].x;
 			ant->food_y = food_list[i].y;
@@ -538,6 +579,31 @@ int i;
 			food_list[i].quantity--;
 
 			return true;
+		}
+	}
+
+	return false;
+}
+
+
+bool look_for_trail(struct ant_t * ant)
+{
+int dx, dy, x, y;
+
+	x = ant->x / CELL_SIDE;
+	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
+
+	for (dx = x - 1; dx <= x + 1; dx++)
+	{
+		for (dy = y - 1; dy <= y + 1; dy++)
+		{
+			if (dx != x && dy != y && grid[dx][dy].odor_intensity > 0)
+			{
+				head_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
+				ant->following_trail = true;
+
+				return true;
+			}		
 		}
 	}
 
@@ -569,10 +635,12 @@ float dx, dy, alpha;
 		ant->angle = alpha;
 }
 
-void check_nest(struct ant_t * ant)
+bool check_nest(struct ant_t * ant)
 {
-	if (distance(ant, nest.x, nest.y) < 2)
-			ant->carrying_food = false;	
+	if (distance(ant, nest.x, nest.y) < NEST_RADIUS)
+		return true;
+
+	return false;
 }
 
 void draw_food(void)
@@ -621,8 +689,16 @@ float angle;
 			//converting degrees in allegro-degrees
 			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
 
-			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
-				                  ant_list[i].y - ANT_RADIUS, ftofix(angle));			
+			if (ant_list[i].carrying_food)
+			{
+				circlefill(buffer, ant_list[i].x, ant_list[i].y, ANT_RADIUS, 
+					makecol(255, 0, 0));
+			}
+			else
+			{
+				rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
+				              ant_list[i].y - ANT_RADIUS, ftofix(angle));			
+			}
 		}
 }
 
@@ -642,23 +718,13 @@ int i, j;
 
 void release_pheromone(struct ant_t * ant)
 {
-int x, y, dx, dy, i;
-unsigned int intensity = (unsigned int)MAX_PHEROMONE_INTENSITY;
-	
+int x, y;
+
 	x = ant->x / CELL_SIDE;
 	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
-	grid[x][y].odor_intensity = intensity;
 
-	i = 1;
-	while ((intensity /= 2) != 0) {
-
-		for (dx = x - i; dx <= x + i; dx++)
-			for (dy = y - i; dy <= y + i; dy++)
-				if (grid[dx][dy].odor_intensity < intensity)
-					grid[dx][dy].odor_intensity = intensity;
-
-		i++;
-	}
+	if (grid[x][y].odor_intensity < MAX_PHEROMONE_INTENSITY)
+		grid[x][y].odor_intensity += ant->pheromone_intensity;
 }
 
 void draw_pheromone(void)
@@ -688,7 +754,7 @@ struct task_par *tp = (struct task_par *) arg;
 		for (i = 0; i < X_NUM_CELL; i++)
 			for (j = 0; j < Y_NUM_CELL; j++)
 				if (grid[i][j].odor_intensity > 0)
-					grid[i][j].odor_intensity--;
+					grid[i][j].odor_intensity -= PHEROMONE_INTENSITY;
 
 	if (deadline_miss(tp)) printf("deadline miss gfx\n");
 		wait_for_period(tp);
@@ -697,33 +763,32 @@ struct task_par *tp = (struct task_par *) arg;
 
 void follow_trail(struct ant_t * ant)
 {
-// int dx, dy, x, y;
-// int max_odor = 0;
-// float angle;
+int cx, cy, x, y, i;
 
-// 	x = ant->x / CELL_SIDE;
-// 	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;	
-// 	angle = ant->angle;
+float angles[] = { ant->angle, ant->angle - M_PI / 4, ant->angle + M_PI / 4,
+                               ant->angle - M_PI / 2, ant->angle + M_PI / 2 };
 
-// 	for (dx = x - 1; dx <= x + 1; dx++)
-// 		for (dy = y - 1; dy <= y + 1; dy++)
-// 		{
-// 			if (dx != x && dy != y && grid[dx][dy].odor_intensity > 0)
-// 			{
-// 				head_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
+	x = ant->x / CELL_SIDE;
+	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
 
-// 				if (fabs(angle - ant->angle) < M_PI_2)
-// 				{
-// 					min_delta = fabs(angle - ant->angle);
-// 					max_odor = grid[dx][dy].odor_intensity;
-// 					cell_x = dx;
-// 					cell_y = dy;
-// 				}
-// 			}		
-// 		}
+	for (i = 0; i < 3; i++)
+	{
+		// indici della cella davanti a me
+		cx = x + (int)(1.5 * cos(angles[i]));
+		cy = y + (int)(1.5 * sin(angles[i]));
 
-// 	if (max_odor > 0)	
-// 		ant->following_trail = true;
-// 	else
-// 		ant->following_trail = false;
+		if (cx == x && cy == y)
+			continue;
+
+		if (grid[cx][cy].odor_intensity > 0)
+		{
+			head_towards(ant, grid[cx][cy].x, grid[cx][cy].y);
+			ant->following_trail = true;
+
+			return;
+		}
+	}
+
+	// se non trovo scie davanti a me, non sto più seguendo
+	ant->following_trail = false;
 }
