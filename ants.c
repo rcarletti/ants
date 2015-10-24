@@ -98,6 +98,7 @@ void setup_food(void);
 char get_scan_code(void);
 
 void draw_ants(void);
+void draw_scouts(void);
 
 void * ant_task(void *);
 void * gfx_task(void *);
@@ -126,6 +127,8 @@ void release_pheromone(struct ant_t *);
 void draw_pheromone(void);
 
 void follow_trail(struct ant_t *);
+
+bool sense_food(struct ant_t *);
 
 
 //---------------------------------------------------------------------------
@@ -191,6 +194,7 @@ void process_inputs(void)
 {
 char	  scan;
 const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
+int i;
 
 	// mouse
 
@@ -214,18 +218,18 @@ const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 			break;
 		case KEY_SPACE:
 		{	
+
+			for(i = 0; i < NUM_SCOUTS; i++)
 			{
-				for(i = 0; i < NUM_SCOUTS; i++)
-				{
-				 	scouts_tp[nScouts].arg = nAnts;
-					scouts_tp[nScouts].period = 20;
-					scouts_tp[nScouts].deadline = 60;
-					scouts_tp[nScouts].priority = 10;
+				scouts_tp[nScouts].arg = nScouts;
+				scouts_tp[nScouts].period = 20;
+				scouts_tp[nScouts].deadline = 60;
+				scouts_tp[nScouts].priority = 10;
 
-					scouts_tid[nScouts] = task_create(scout_task, &scouts_tp[nScouts]);
+				scouts_tid[nScouts] = task_create(scout_task, &scouts_tp[nScouts]);
 
-					nScouts++;
-				}
+				nScouts++;
+			}
 
 				/*tp[nAnts].arg = nAnts;
 				tp[nAnts].period = 20;
@@ -235,7 +239,6 @@ const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 				tid[nAnts] = task_create(ant_task, &tp[nAnts]);
 
 				nAnts++;*/
-			}	
 			break;
 		}
 		default: 
@@ -487,6 +490,8 @@ BITMAP * nest_image;
 		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);
 
 		draw_ants();
+
+		draw_scouts();
 	
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
@@ -740,7 +745,6 @@ int i, j;
 void release_pheromone(struct ant_t * ant)
 {
 int x, y;
-
 	x = ant->x / CELL_SIDE;
 	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
 
@@ -816,6 +820,8 @@ float angles[] = { ant->angle, ant->angle - M_PI / 4, ant->angle + M_PI / 4,
 
 void * scout_task(void * arg)
 {
+float vx, vy, da;
+bool found_food = false;
 
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * scout = &scout_list[tp->arg];
@@ -824,7 +830,7 @@ struct ant_t * scout = &scout_list[tp->arg];
 	scout->y = nest.y; 
 	scout->speed = ANT_SPEED;
 	scout->angle = deg_to_rad(frand(0,360));
-	scout->pheromone_intensity = PHEROMONE_INTENSITY;
+	scout->pheromone_intensity = 10;
 
 	scout->following_trail = false;
 	scout->carrying_food = false;
@@ -835,18 +841,77 @@ struct ant_t * scout = &scout_list[tp->arg];
 	{
 		bool at_home = check_nest(scout);
 
-		if(!at_home && !ant->carrying_food)	//se non sono al nido e non sto portando cibo cerco a caso
+        // Caso iniziale: sto girando liberamente senza cibo
+		if(!scout->carrying_food && !scout->following_trail)	
 		{
-			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-			ant->angle += da;
-
-			if (look_for_food(scout))
-			{	
-				head_towards(scout, nest.x, nest.y);		//mi dirigo verso il cibo
-				release_pheromone(scout);					//rilascio i feromoni
-			}
+		    // L'obiettivo primario è trovare cibo e portarlo a casa
+		    
+		    // Se rilevo cibo vicino
+		    if (sense_food(scout))
+		    {
+		        // Inizio a rilasciare feromone
+		        release_pheromone(scout);
+		        
+		        // Se ci sono sopra
+    		    if (look_for_food(scout))
+                {
+                    // Dirigiti verso il nido rilasciando feromone
+                    head_towards(scout, nest.x, nest.y);
+                }
+		    }
+            // Se non ho cibo attorno a me, per il momento cerco a caso
+            else
+            {
+                da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+                scout->angle += da;
+                
+                // Poi dopo si vede se considerare una scia
+            }
 		}
 
+		// Caso successivo: ho cibo in spalla, e sto tornando a casa
+		if (scout->carrying_food)
+		{
+		    // Se sono arrivato, poso la roba e torno al cibo
+		    if (at_home)
+		    {
+    			// deposita il cibo
+    			scout->carrying_food = false;
+    
+    			// girati
+    			scout->angle += M_PI;
+    
+    			// segui la scia verso il cibo
+    			follow_trail(scout);
+		    }
+    		// Se non sono arrivato, seguo la scia fino a casa, rilasciando feromone
+		    else
+		    {
+				head_towards(scout, nest.x, nest.y);
+				release_pheromone(scout);
+		    }
+		}
+
+        // Penultimo caso: sto tornando verso il cibo seguendo la scia
+        if (!scout->carrying_food && scout->following_trail)
+        {
+            // Controllo se sono arrivato al cibo
+            if (look_for_food(scout))
+            {
+                // Se lo trovo, mi giro e torno a casa
+    			scout->angle += M_PI;
+            }
+            
+            // In ogni caso, continuo a seguire la scia
+    		follow_trail(scout);
+    		
+    		// Se la scia si è finita, e non ho trovato niente, vado a caso
+    		if (!scout->following_trail)
+    		{
+    		    // TODO: qui ci va la cosa per far capire alle altre che ho finito
+    		}
+        }
+        
 		// aggiorna velocità e posizione
 		vx = scout->speed * cos(scout->angle);
 		vy = scout->speed * sin(scout->angle);
@@ -859,6 +924,60 @@ struct ant_t * scout = &scout_list[tp->arg];
 		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
 	}
+}
 
+void draw_scouts(void)
+{
+int i;
+BITMAP * ant;
+BITMAP * ant_food;
+float angle;
 
+	ant = load_bitmap("ant.bmp", NULL);
+	ant_food = load_bitmap("ant_food.bmp", NULL);
+
+	if (ant == NULL)
+	{
+		printf("errore ant \n");
+		exit(1);
+	}
+
+	for (i = 0; i < nScouts; i++)
+	{
+		//converting degrees in allegro-degrees
+
+		angle = ((rad_to_deg(scout_list[i].angle + M_PI_2) * 256 / 360));
+
+		if(!scout_list[i].carrying_food)
+			rotate_sprite(buffer, ant, scout_list[i].x - ANT_RADIUS, 
+				        scout_list[i].y - ANT_RADIUS, ftofix(angle));
+		else
+			rotate_sprite(buffer, ant_food, scout_list[i].x - ANT_RADIUS, 
+				        scout_list[i].y - ANT_RADIUS, ftofix(angle));
+	
+	}
+}
+
+bool sense_food(struct ant_t * ant)
+{
+	int i;
+
+	for (i = 0; i < MAX_FOOD_NUM; i++)
+	{
+	float dist = distance(ant, food_list[i].x, food_list[i].y);
+
+		if (food_list[i].quantity > 0 && 
+			dist < ((food_list[i].quantity * FOOD_SCALE / 2) + 10)
+		   )
+		{
+
+			ant->food_x = food_list[i].x;
+			ant->food_y = food_list[i].y;
+
+			head_towards(ant, ant->food_x , ant->food_y);
+			return true;
+		}
+	}
+
+	return false;
 }
