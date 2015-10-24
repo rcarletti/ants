@@ -28,7 +28,7 @@
 *.x86_64
 *.hex
 
-./ants
+/ants
 
 # Debug files
 *.dSYM/
