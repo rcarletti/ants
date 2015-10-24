@@ -27,7 +27,7 @@
 #define	DELTA_ANGLE				5		//max angle deviation
 #define	DELTA_SPEED				0.1		//max_speed deviation
 #define	ANT_PERIOD				0.02
-#define ANT_SPEED				20
+#define ANT_SPEED				20 
 #define ANT_RADIUS				8
 
 #define NEST_RADIUS				40
@@ -52,7 +52,7 @@ struct food_t
 	int 	x;						//center coord
 	int 	y;						//center coord
 	int 	quantity;
-	int 	radius;
+	float 	radius;
 
 };
 
@@ -77,6 +77,7 @@ struct cell_t
 	float y;
 	int odor_intensity;
 };
+
 //---------------------------------------------------------------------------
 //FUNCTION DECLARATIONS
 //---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ void bounce(struct ant_t *);
 float deg_to_rad(float);
 float rad_to_deg(float);
 
-void check_for_food(struct ant_t *);
+struct food_t check_for_food(struct ant_t *);
 float distance(struct ant_t *, float, float);
 
 void head_to_the_nest(struct ant_t *);
@@ -407,8 +408,7 @@ BITMAP * nest_image;
 
 float frand(float xmi, float xma)
 {
-float 	r;
-	
+float 	r;	
 	r = (float)rand()/(float)RAND_MAX;
 	return xmi + (xma - xmi) * r;
 }
@@ -420,7 +420,6 @@ float 	r;
 
 void put_nest(void)
 {
-
 	nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
 	nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),WINDOW_HEIGHT - (NEST_RADIUS * 2));
 }
@@ -432,22 +431,22 @@ void put_nest(void)
 
 void bounce(struct ant_t * ant)
 {
-	if(ant->x <= ANT_RADIUS)									//left side
+	if (ant->x <= ANT_RADIUS)									//left side
 	{
 		ant->angle +=deg_to_rad(90);
 	}
 
-	if(ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))				//right side
+	if (ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))				//right side
 	{
 		ant->angle -= deg_to_rad(90);
 	}
 
-	if(ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))			//up side?????
+	if (ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))			//up side?????
 	{
 		ant->angle += deg_to_rad(90);
 	}
 
-	if(ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)					//bottom side
+	if (ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)					//bottom side
 	{
 		ant->angle -= deg_to_rad(90);
 	}
@@ -481,22 +480,29 @@ float rad_to_deg(float angle)
 //---------------------------------------------------------------------
 
 
-void check_for_food(struct ant_t * ant)
+struct food_t check_for_food(struct ant_t * ant)
 {
 int i;
+struct food_t app;
+	app.x = -1;
+	app.y = -1;
 
-	for(i = 0; i < n_food; i++)
+	for (i = 0; i < n_food; i++)
 	{
-		if(distance(ant, food_list[i].x, food_list[i].y) < FOOD_BASE_RADIUS)
+		if (distance(ant, food_list[i].x, food_list[i].y) < FOOD_BASE_RADIUS)
 		{
 			ant->has_food = true;
 			food_list[i].quantity--;
-		}
+			if (food_list[i].quantity == 0)
+				food_list[i].quantity = 0;
+			return food_list[i];						//ritorno le coordinate del cibo che ho trovato
+		}	 
 	}
+	return app;											//altrimenti ritorno coordinate fasulle
 }
 
 //---------------------------------------------------------------------
-// calcola la distanza fra la formica e il cibo
+//
 //---------------------------------------------------------------------
 
 
@@ -522,7 +528,7 @@ float x, y, alpha;
 
 void check_nest(struct ant_t * ant)
 {
-	if(distance(ant, nest.x, nest.y) < 2)
+	if (distance(ant, nest.x, nest.y) < 2)
 			ant->has_food = false;	
 }
 
@@ -533,7 +539,7 @@ int i;
 	BITMAP * food;
 
 	food = load_bitmap("sugar.bmp", NULL);
-	if(food == NULL)
+	if (food == NULL)
 	{
 		printf("errore food \n");
 		exit(1);
@@ -560,7 +566,7 @@ float angle;
 
 	ant = load_bitmap("ant.bmp", NULL);
 
-	if(ant == NULL)
+	if (ant == NULL)
 	{
 		printf("errore ant \n");
 		exit(1);
@@ -626,5 +632,4 @@ struct task_par *tp = (struct task_par *) arg;
 	if (deadline_miss(tp)) printf("deadline miss gfx\n");
 		wait_for_period(tp);
 	}
-
 }
