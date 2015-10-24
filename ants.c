@@ -41,6 +41,8 @@
 #define X_NUM_CELL				(int)BACKGROUND_WIDTH / CELL_SIDE
 #define Y_NUM_CELL				(int)BACKGROUND_HEIGHT / CELL_SIDE
 
+#define	NUM_SCOUTS				5
+
 
 
 
@@ -69,6 +71,7 @@ struct ant_t
 	bool 	found_food, carrying_food, following_trail;
 	float   food_x, food_y;
 };
+
 
 struct nest_t
 {
@@ -99,6 +102,7 @@ void draw_ants(void);
 void * ant_task(void *);
 void * gfx_task(void *);
 void * pheromone_task(void *);
+void * scout_task(void *);
 
 float frand(float, float);
 void put_nest(void);
@@ -145,6 +149,12 @@ struct nest_t		nest;
 pthread_t 			tid[MAX_ANTS];
 struct task_par		tp[MAX_ANTS];
 pthread_attr_t		attr[MAX_ANTS];
+
+pthread_t 			scouts_tid[NUM_SCOUTS];
+struct task_par		scouts_tp[NUM_SCOUTS];
+pthread_attr_t		scouts_attr[NUM_SCOUTS];
+struct ant_t 		scout_list[NUM_SCOUTS] = {{0}};
+int 				nScouts = 0;
 
 bool				running = true;
 
@@ -203,17 +213,28 @@ const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 			running = false;
 			break;
 		case KEY_SPACE:
-		{
-			if (nAnts < MAX_ANTS)
+		{	
 			{
-				tp[nAnts].arg = nAnts;
+				for(i = 0; i < NUM_SCOUTS; i++)
+				{
+				 	scouts_tp[nScouts].arg = nAnts;
+					scouts_tp[nScouts].period = 20;
+					scouts_tp[nScouts].deadline = 60;
+					scouts_tp[nScouts].priority = 10;
+
+					scouts_tid[nScouts] = task_create(scout_task, &scouts_tp[nScouts]);
+
+					nScouts++;
+				}
+
+				/*tp[nAnts].arg = nAnts;
 				tp[nAnts].period = 20;
 				tp[nAnts].deadline = 60;
 				tp[nAnts].priority = 10;
 
 				tid[nAnts] = task_create(ant_task, &tp[nAnts]);
 
-				nAnts++;
+				nAnts++;*/
 			}	
 			break;
 		}
@@ -383,7 +404,7 @@ struct ant_t * ant = &ant_list[tp->arg];
 		{
 			// segui la scia verso casa
 			follow_trail(ant);
-			
+
 			if (!ant->following_trail)
 			{
 				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
@@ -791,4 +812,53 @@ float angles[] = { ant->angle, ant->angle - M_PI / 4, ant->angle + M_PI / 4,
 
 	// se non trovo scie davanti a me, non sto più seguendo
 	ant->following_trail = false;
+}
+
+void * scout_task(void * arg)
+{
+
+struct task_par * tp = (struct task_par *) arg;
+struct ant_t * scout = &scout_list[tp->arg];
+
+	scout->x = nest.x; 
+	scout->y = nest.y; 
+	scout->speed = ANT_SPEED;
+	scout->angle = deg_to_rad(frand(0,360));
+	scout->pheromone_intensity = PHEROMONE_INTENSITY;
+
+	scout->following_trail = false;
+	scout->carrying_food = false;
+
+	set_period(tp);
+
+	while(1)
+	{
+		bool at_home = check_nest(scout);
+
+		if(!at_home && !ant->carrying_food)	//se non sono al nido e non sto portando cibo cerco a caso
+		{
+			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+			ant->angle += da;
+
+			if (look_for_food(scout))
+			{	
+				head_towards(scout, nest.x, nest.y);		//mi dirigo verso il cibo
+				release_pheromone(scout);					//rilascio i feromoni
+			}
+		}
+
+		// aggiorna velocità e posizione
+		vx = scout->speed * cos(scout->angle);
+		vy = scout->speed * sin(scout->angle);
+
+		scout->x += vx * ANT_PERIOD;
+		scout->y += vy * ANT_PERIOD;
+
+		bounce(scout);
+
+		if (deadline_miss(tp)) printf("deadline miss\n");
+		wait_for_period(tp);
+	}
+
+
 }
