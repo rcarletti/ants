@@ -17,25 +17,29 @@
 #define BACKGROUND_WIDTH		800
 #define BACKGROUND_HEIGHT		600
 
-#define FOOD_BASE_RADIUS		40										//grandezza base dell'immagine della pila di cibo
 #define FOOD_DETECTION_RADIUS	(FOOD_BASE_RADIUS + 20)
 #define FOOD_BASE_ODOR			(FOOD_DETECTION_RADIUS * FOOD_DETECTION_RADIUS)
-#define MAX_FOOD_NUM			5										//numero massimo di pile di cibo
-#define MAX_FOOD_QUANTITY		10										//numero massimo di cibo per pila	
+
+#define MAX_FOOD_NUM			5	//numero massimo di pile di cibo
+#define MAX_FOOD_QUANTITY		10	//numero massimo di cibo per pila
+#define FOOD_SCALE              8   // radius = quantity * scale	
 
 #define MAX_ANTS				20		//max numero di formiche
-#define	DELTA_ANGLE				5		//max angle deviation
-#define	DELTA_SPEED				0.1		//max_speed deviation
-#define	ANT_PERIOD				0.02
+#define DELTA_ANGLE				5		//max angle deviation
+#define DELTA_SPEED				0.1		//max_speed deviation
+#define ANT_PERIOD				0.02
 #define ANT_SPEED				20 
 #define ANT_RADIUS				8
 
 #define NEST_RADIUS				40
 
-#define PHEROMONE_RADIUS		20													//raggio dei feromoni
-#define	MAX_PHEROMONE_INTENSITY	10													//intensità dei feromoni
-#define X_NUM_CELL				(int)BACKGROUND_WIDTH / MAX_PHEROMONE_INTENSITY		//numero di celle sull'asse x
-#define	Y_NUM_CELL				(int)BACKGROUND_HEIGHT / MAX_PHEROMONE_INTENSITY	//numero di celle sull'asse y
+#define MAX_PHEROMONE_INTENSITY 10
+#define PHEROMONE_INTENSITY     1
+#define PHEROMONE_TASK_PERIOD   20000
+
+#define CELL_SIDE				10
+#define X_NUM_CELL				(int)BACKGROUND_WIDTH / CELL_SIDE
+#define Y_NUM_CELL				(int)BACKGROUND_HEIGHT / CELL_SIDE
 
 
 
@@ -52,17 +56,18 @@ struct food_t
 	int 	x;						//center coord
 	int 	y;						//center coord
 	int 	quantity;
-	float 	radius;
 
 };
 
 struct ant_t
 {
-	float 	x;
-	float 	y;
+	float 	x, y;
 	float 	speed;
 	float	angle;
-	bool 	has_food;
+	int     pheromone_intensity;
+
+	bool 	found_food, carrying_food, following_trail;
+	float   food_x, food_y;
 };
 
 struct nest_t
@@ -103,10 +108,10 @@ void bounce(struct ant_t *);
 float deg_to_rad(float);
 float rad_to_deg(float);
 
-struct food_t check_for_food(struct ant_t *);
+bool look_for_food(struct ant_t *);
 float distance(struct ant_t *, float, float);
 
-void head_to_the_nest(struct ant_t *);
+void head_towards(struct ant_t *, float, float);
 void check_nest(struct ant_t *);
 
 void setup_grid(void);
@@ -114,6 +119,8 @@ void setup_grid(void);
 void release_pheromone(struct ant_t *);
 
 void draw_pheromone(void);
+
+void follow_trail(struct ant_t *);
 
 
 //---------------------------------------------------------------------------
@@ -146,7 +153,7 @@ struct task_par     gfx_tp;
 pthread_t           ph_tid;
 struct task_par     ph_tp;
 
-struct cell_t 		grid[X_NUM_CELL][Y_NUM_CELL];			//griglia dello sfondo
+struct cell_t 		grid[X_NUM_CELL][Y_NUM_CELL];	//griglia dello sfondo
 
 
 //---------------------------------------------------------------------------
@@ -171,13 +178,14 @@ int main(int argc, char * argv[])
 
 void process_inputs(void)
 {
-char	scan;
+char	  scan;
+const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 
 	// mouse
 
 	food_x = mouse_x;
 	food_y = mouse_y;
-	if(food_x < (BACKGROUND_WIDTH - FOOD_BASE_RADIUS) && 
+	if (food_x < (BACKGROUND_WIDTH - FOOD_BASE_RADIUS) && 
 		food_y > (WINDOW_HEIGHT - BACKGROUND_HEIGHT + FOOD_BASE_RADIUS) &&
 		food_x > FOOD_BASE_RADIUS && 
 		food_y < (WINDOW_HEIGHT - FOOD_BASE_RADIUS))
@@ -231,7 +239,6 @@ int 	i;
 				food_list[i].x = food_x;
 				food_list[i].y = food_y;
 				food_list[i].quantity = MAX_FOOD_QUANTITY;
-				food_list[i].radius = FOOD_BASE_RADIUS;
 				n_food++;
 				break;
 			}
@@ -279,7 +286,7 @@ void setup(void)
 	gfx_tid = task_create(gfx_task, &gfx_tp);
 
 	ph_tp.arg = 0;
-	ph_tp.period = 800;
+	ph_tp.period = PHEROMONE_TASK_PERIOD;
 	ph_tp.deadline = 800;
 	ph_tp.priority = 10;
 
@@ -313,24 +320,35 @@ struct ant_t * ant = &ant_list[tp->arg];
 	ant->y = nest.y; 
 	ant->speed = ANT_SPEED;
 	ant->angle = deg_to_rad(frand(0,360));
-	ant->has_food = false;
+	ant->pheromone_intensity = PHEROMONE_INTENSITY;
+	ant->found_food = false;
+	ant->carrying_food = false;
+	ant->following_trail = false;
 
 	set_period(tp);
 
 	while(1)
 	{
-		if (!ant->has_food)
+		if (!ant->found_food)
 		{
 			da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-			ant->angle += da;	
+			ant->angle += da;
 
-			check_for_food(ant);
+			look_for_food(ant);
+			//if (!look_for_food(ant))
+			//	follow_trail(ant);
+
+			if (!ant->following_trail)
+			{
+			}
 		}
-
-		else if (ant->has_food)
+		else
 		{
-			head_to_the_nest(ant);
-			release_pheromone(ant);
+			if (ant->carrying_food)
+				head_towards(ant, nest.x, nest.y);
+			else
+				head_towards(ant, ant->food_x, ant->food_y);
+
 		}
 
 		vx = ant->speed * cos(ant->angle);
@@ -340,7 +358,22 @@ struct ant_t * ant = &ant_list[tp->arg];
 		ant->y += vy * ANT_PERIOD;
 
 		bounce(ant);
-		check_nest(ant);
+
+		release_pheromone(ant);
+		
+		if (ant->found_food)
+		{
+			if (ant->carrying_food)
+				check_nest(ant);
+			else
+			{
+				bool found = look_for_food(ant);
+				float dist = distance(ant, ant->food_x, ant->food_y);
+
+				if (dist < 1.0 && !found)
+					ant->found_food = false;
+			}
+		}
 
 		if (deadline_miss(tp)) printf("deadline miss\n");
 		wait_for_period(tp);
@@ -383,13 +416,13 @@ BITMAP * nest_image;
 
 		clear_to_color(buffer, 0);
 
-		draw_sprite(buffer, ground, 0, WINDOW_HEIGHT - BACKGROUND_HEIGHT);						//draw ground
+		draw_sprite(buffer, ground, 0, WINDOW_HEIGHT - BACKGROUND_HEIGHT);
 
-		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);			//draw nest
+		draw_pheromone();
 
 		draw_food();
 
-		draw_pheromone();
+		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);
 
 		draw_ants();
 	
@@ -421,7 +454,8 @@ float 	r;
 void put_nest(void)
 {
 	nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
-	nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),WINDOW_HEIGHT - (NEST_RADIUS * 2));
+	nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),
+				   WINDOW_HEIGHT - (NEST_RADIUS * 2));
 }
 
 //---------------------------------------------------------------------
@@ -431,22 +465,22 @@ void put_nest(void)
 
 void bounce(struct ant_t * ant)
 {
-	if (ant->x <= ANT_RADIUS)									//left side
+	if (ant->x <= ANT_RADIUS)
 	{
 		ant->angle +=deg_to_rad(90);
 	}
 
-	if (ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))				//right side
+	if (ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))
 	{
 		ant->angle -= deg_to_rad(90);
 	}
 
-	if (ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))			//up side?????
+	if (ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))
 	{
 		ant->angle += deg_to_rad(90);
 	}
 
-	if (ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)					//bottom side
+	if (ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)
 	{
 		ant->angle -= deg_to_rad(90);
 	}
@@ -480,25 +514,34 @@ float rad_to_deg(float angle)
 //---------------------------------------------------------------------
 
 
-struct food_t check_for_food(struct ant_t * ant)
+bool look_for_food(struct ant_t * ant)
 {
 int i;
-struct food_t app;
-	app.x = -1;
-	app.y = -1;
 
-	for (i = 0; i < n_food; i++)
+	for (i = 0; i < MAX_FOOD_NUM; i++)
 	{
-		if (distance(ant, food_list[i].x, food_list[i].y) < FOOD_BASE_RADIUS)
+	float dist = distance(ant, food_list[i].x, food_list[i].y);
+
+		if (food_list[i].quantity > 0 && 
+			dist < (food_list[i].quantity * FOOD_SCALE / 2)
+		   )
 		{
-			ant->has_food = true;
+			ant->found_food = true;
+			ant->carrying_food = true;
+			ant->following_trail = false;
+
+			ant->pheromone_intensity++;
+
+			ant->food_x = food_list[i].x;
+			ant->food_y = food_list[i].y;
+
 			food_list[i].quantity--;
-			if (food_list[i].quantity == 0)
-				food_list[i].quantity = 0;
-			return food_list[i];						//ritorno le coordinate del cibo che ho trovato
-		}	 
+
+			return true;
+		}
 	}
-	return app;											//altrimenti ritorno coordinate fasulle
+
+	return false;
 }
 
 //---------------------------------------------------------------------
@@ -516,25 +559,26 @@ int distance_x, distance_y, distance;
 	return distance;
 }
 
-void head_to_the_nest(struct ant_t * ant)
+void head_towards(struct ant_t * ant, float x, float y)
 {
-float x, y, alpha;
+float dx, dy, alpha;
 
-		x = (nest.x - ant->x);
-		y = (nest.y - ant->y);
-		alpha = atan2(y,x) ;
+		dx = (x - ant->x);
+		dy = (y - ant->y);
+		alpha = atan2(dy,dx) ;
 		ant->angle = alpha;
 }
 
 void check_nest(struct ant_t * ant)
 {
 	if (distance(ant, nest.x, nest.y) < 2)
-			ant->has_food = false;	
+			ant->carrying_food = false;	
 }
 
 void draw_food(void)
 {
 int i;
+int radius;
 
 	BITMAP * food;
 
@@ -548,11 +592,11 @@ int i;
 	for (i = 0; i < MAX_FOOD_NUM; i++)
 			if (food_list[i].quantity > 0)
 			{
+				radius = (food_list[i].quantity * FOOD_SCALE) / 2;
+
 				stretch_sprite(buffer, food, 
-				food_list[i].x - FOOD_BASE_RADIUS,
-				food_list[i].y - FOOD_BASE_RADIUS,
-				(float)food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2,
-				(float)food_list[i].quantity / MAX_FOOD_QUANTITY * FOOD_BASE_RADIUS * 2);	
+					food_list[i].x - radius, food_list[i].y - radius,
+					radius * 2, radius * 2);	
 			}
 			
 				
@@ -574,9 +618,11 @@ float angle;
 
 	for (i = 0; i < nAnts; i++)
 		{
-			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));				//converting degrees in allegro-degrees
+			//converting degrees in allegro-degrees
+			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
 
-			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, ant_list[i].y - ANT_RADIUS, ftofix(angle));			
+			rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
+				                  ant_list[i].y - ANT_RADIUS, ftofix(angle));			
 		}
 }
 
@@ -587,32 +633,47 @@ int i, j;
 	for (i = 0; i < X_NUM_CELL; i++)
 		for (j = 0; j < Y_NUM_CELL; j++)
 		{
-			grid[i][j].x = i * PHEROMONE_RADIUS + PHEROMONE_RADIUS;
-			grid[i][j].y = j * PHEROMONE_RADIUS + PHEROMONE_RADIUS;
+			grid[i][j].x = i * CELL_SIDE + CELL_SIDE / 2;
+			grid[i][j].y = j * CELL_SIDE + CELL_SIDE / 2 + 
+			                   (WINDOW_HEIGHT - BACKGROUND_HEIGHT);
 			grid[i][j].odor_intensity = 0;
 		}
 }
 
 void release_pheromone(struct ant_t * ant)
 {
-int x, y;
+int x, y, dx, dy, i;
+unsigned int intensity = (unsigned int)MAX_PHEROMONE_INTENSITY;
 	
-	x = ant->x / PHEROMONE_RADIUS;
-	y = ant->y / PHEROMONE_RADIUS;
-	grid[x][y].odor_intensity = MAX_PHEROMONE_INTENSITY;
+	x = ant->x / CELL_SIDE;
+	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
+	grid[x][y].odor_intensity = intensity;
+
+	i = 1;
+	while ((intensity /= 2) != 0) {
+
+		for (dx = x - i; dx <= x + i; dx++)
+			for (dy = y - i; dy <= y + i; dy++)
+				if (grid[dx][dy].odor_intensity < intensity)
+					grid[dx][dy].odor_intensity = intensity;
+
+		i++;
+	}
 }
 
 void draw_pheromone(void)
 {
 int i, j;
 BITMAP * trail;
+int col = makecol(246, 240, 127);
+
 	trail = load_bitmap("scia.bmp", NULL);
 
 	for (i = 0; i < X_NUM_CELL; i++)
 		for (j = 0; j < Y_NUM_CELL; j++)
 			if (grid[i][j].odor_intensity > 0)
-				stretch_sprite(buffer, trail, grid[i-1][j-1].x, grid[i-1][j-1].y, PHEROMONE_RADIUS * 2, PHEROMONE_RADIUS * 2);
-
+				circlefill(buffer, grid[i][j].x, grid[i][j].y, 
+					       (grid[i][j].odor_intensity + 1) / 2, col);
 }
 
 void * pheromone_task(void * arg)
@@ -632,4 +693,37 @@ struct task_par *tp = (struct task_par *) arg;
 	if (deadline_miss(tp)) printf("deadline miss gfx\n");
 		wait_for_period(tp);
 	}
+}
+
+void follow_trail(struct ant_t * ant)
+{
+// int dx, dy, x, y;
+// int max_odor = 0;
+// float angle;
+
+// 	x = ant->x / CELL_SIDE;
+// 	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;	
+// 	angle = ant->angle;
+
+// 	for (dx = x - 1; dx <= x + 1; dx++)
+// 		for (dy = y - 1; dy <= y + 1; dy++)
+// 		{
+// 			if (dx != x && dy != y && grid[dx][dy].odor_intensity > 0)
+// 			{
+// 				head_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
+
+// 				if (fabs(angle - ant->angle) < M_PI_2)
+// 				{
+// 					min_delta = fabs(angle - ant->angle);
+// 					max_odor = grid[dx][dy].odor_intensity;
+// 					cell_x = dx;
+// 					cell_y = dy;
+// 				}
+// 			}		
+// 		}
+
+// 	if (max_odor > 0)	
+// 		ant->following_trail = true;
+// 	else
+// 		ant->following_trail = false;
 }
