@@ -600,8 +600,6 @@ void draw_pheromone(void)
 {
 int i, j;
 BITMAP * trail;
-int yellow = makecol(238,240,39);
-
 	trail = load_bitmap("scia.bmp", NULL);
 
 	for (i = 0; i < X_NUM_CELL; i++)
