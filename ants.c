@@ -24,7 +24,7 @@
 #define MAX_FOOD_QUANTITY		10	//numero massimo di cibo per pila
 #define FOOD_SCALE              8   // radius = quantity * scale	
 
-#define MAX_ANTS				20		//max numero di formiche
+#define NUM_ANTS				20		//numero di formiche normali
 #define DELTA_ANGLE				5		//max angle deviation
 #define DELTA_SPEED				0.1		//max_speed deviation
 #define ANT_PERIOD				0.02
@@ -144,14 +144,14 @@ bool 				should_put_food = false;
 struct food_t 		food_list[MAX_FOOD_NUM] = {{0}};		
 int 				n_food = 0;
 
-struct ant_t 		ant_list[MAX_ANTS] = {{0}};
+struct ant_t 		ant_list[NUM_ANTS] = {{0}};
 int 				nAnts = 0;
 
 struct nest_t		nest;
 
-pthread_t 			tid[MAX_ANTS];
-struct task_par		tp[MAX_ANTS];
-pthread_attr_t		attr[MAX_ANTS];
+pthread_t 			tid[NUM_ANTS];
+struct task_par		tp[NUM_ANTS];
+pthread_attr_t		attr[NUM_ANTS];
 
 pthread_t 			scouts_tid[NUM_SCOUTS];
 struct task_par		scouts_tp[NUM_SCOUTS];
@@ -169,6 +169,12 @@ struct task_par     ph_tp;
 
 struct cell_t 		grid[X_NUM_CELL][Y_NUM_CELL];	//griglia dello sfondo
 
+pthread_mutex_t		scout_mutex;
+pthread_cond_t		scout_condition;
+
+
+int 				counter_food_found = 0;			//cibi trovati non ancora finiti
+
 
 //---------------------------------------------------------------------------
 //FUNCTION DEFINITIONS
@@ -176,6 +182,7 @@ struct cell_t 		grid[X_NUM_CELL][Y_NUM_CELL];	//griglia dello sfondo
 
 int main(int argc, char * argv[])
 {
+
 	setup();
 
 	while (running)
@@ -184,6 +191,7 @@ int main(int argc, char * argv[])
 
 		put_food();
 	}
+
 	
 	allegro_exit();
 	return 0;
@@ -194,7 +202,7 @@ void process_inputs(void)
 {
 char	  scan;
 const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
-int i;
+int i, j;
 
 	// mouse
 
@@ -230,20 +238,11 @@ int i;
 
 				nScouts++;
 			}
-
-				/*tp[nAnts].arg = nAnts;
-				tp[nAnts].period = 20;
-				tp[nAnts].deadline = 60;
-				tp[nAnts].priority = 10;
-
-				tid[nAnts] = task_create(ant_task, &tp[nAnts]);
-
-				nAnts++;*/
 			break;
 		}
 		default: 
 			break;
-	}			
+	}
 }
 
 //-----------------------------------------------------------------------
@@ -278,7 +277,11 @@ int 	i;
 
 void setup(void)
 {
+int j;
 	//allegro setup
+
+	pthread_mutex_init(&scout_mutex, NULL);
+	pthread_cond_init(&scout_condition, NULL);
 
 	allegro_init();
 	install_keyboard();
@@ -317,8 +320,21 @@ void setup(void)
 
 	ph_tid = task_create(pheromone_task, &ph_tp);
 
-
 	put_nest();
+
+	for(j = 0; j < NUM_ANTS; j++)
+	{
+		tp[nAnts].arg = nAnts;
+		tp[nAnts].period = 60;
+		tp[nAnts].deadline = 100;
+		tp[nAnts].priority = 10;
+
+		tid[nAnts] = task_create(ant_task, &tp[nAnts]);
+
+		nAnts++;		
+	}
+
+	
 }
 
 char get_scan_code(void)
@@ -354,7 +370,17 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 	while(1)
 	{
+
 	bool at_home = check_nest(ant);
+
+
+			pthread_mutex_lock(&scout_mutex);
+			while (counter_food_found == 0)
+			{		
+				pthread_cond_wait(&scout_condition, &scout_mutex);
+			}
+			pthread_mutex_unlock(&scout_mutex);
+
 
 		// se non ho cibo e non sono su una scia
 		if (!at_home && !ant->carrying_food && !ant->following_trail)
@@ -440,7 +466,7 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 		bounce(ant);
 
-		if (deadline_miss(tp)) printf("deadline miss\n");
+		if (deadline_miss(tp)) printf("deadline miss ant\n");
 		wait_for_period(tp);
 	}
 } 
@@ -522,10 +548,6 @@ void put_nest(void)
 {
 	nest.x = BACKGROUND_WIDTH / 2;
 	nest.y = (WINDOW_HEIGHT - BACKGROUND_HEIGHT) + BACKGROUND_HEIGHT / 2;
-
-	//nest.x = frand(NEST_RADIUS * 2, BACKGROUND_WIDTH - NEST_RADIUS * 2);
-	//nest.y = frand(WINDOW_HEIGHT - BACKGROUND_HEIGHT + (NEST_RADIUS * 2),
-	//			   WINDOW_HEIGHT - (NEST_RADIUS * 2));
 }
 
 //---------------------------------------------------------------------
@@ -604,8 +626,14 @@ int i;
 
 			food_list[i].quantity--;
 
+			
 			return true;
 		}
+
+		/*if(food_list[i].quantity == 0)
+		{
+			counter_food_found--;
+		}*/
 	}
 
 	return false;
@@ -710,21 +738,14 @@ float angle;
 		exit(1);
 	}
 
-	for (i = 0; i < nAnts; i++)
+	for (i = 0; i < NUM_ANTS; i++)
 		{
 			//converting degrees in allegro-degrees
 			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
 
-			if (ant_list[i].carrying_food)
-			{
-				circlefill(buffer, ant_list[i].x, ant_list[i].y, ANT_RADIUS, 
-					makecol(255, 0, 0));
-			}
-			else
-			{
 				rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
 				              ant_list[i].y - ANT_RADIUS, ftofix(angle));			
-			}
+
 		}
 }
 
@@ -823,6 +844,7 @@ void * scout_task(void * arg)
 float vx, vy, da;
 bool found_food = false;
 
+
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * scout = &scout_list[tp->arg];
 
@@ -857,6 +879,7 @@ struct ant_t * scout = &scout_list[tp->arg];
                 {
                     // Dirigiti verso il nido rilasciando feromone
                     head_towards(scout, nest.x, nest.y);
+                    found_food = true;
                 }
 		    }
             // Se non ho cibo attorno a me, per il momento cerco a caso
@@ -875,6 +898,17 @@ struct ant_t * scout = &scout_list[tp->arg];
 		    // Se sono arrivato, poso la roba e torno al cibo
 		    if (at_home)
 		    {
+		    	if(found_food == true)
+		    	{
+		    		//se ho riportato cibo al nido posso risvegliare le altre formiche
+		    		found_food = false;
+
+		    		pthread_mutex_lock(&scout_mutex);
+		    		counter_food_found++;
+		    		pthread_mutex_unlock(&scout_mutex);
+		    		pthread_cond_broadcast(&scout_condition);
+
+		    	}
     			// deposita il cibo
     			scout->carrying_food = false;
     
@@ -895,13 +929,15 @@ struct ant_t * scout = &scout_list[tp->arg];
         // Penultimo caso: sto tornando verso il cibo seguendo la scia
         if (!scout->carrying_food && scout->following_trail)
         {
+
+        	sense_food(scout);
             // Controllo se sono arrivato al cibo
             if (look_for_food(scout))
             {
                 // Se lo trovo, mi giro e torno a casa
     			scout->angle += M_PI;
             }
-            
+
             // In ogni caso, continuo a seguire la scia
     		follow_trail(scout);
     		
@@ -921,7 +957,7 @@ struct ant_t * scout = &scout_list[tp->arg];
 
 		bounce(scout);
 
-		if (deadline_miss(tp)) printf("deadline miss\n");
+		if (deadline_miss(tp)) printf("deadline miss scout\n");
 		wait_for_period(tp);
 	}
 }
@@ -967,7 +1003,7 @@ bool sense_food(struct ant_t * ant)
 	float dist = distance(ant, food_list[i].x, food_list[i].y);
 
 		if (food_list[i].quantity > 0 && 
-			dist < ((food_list[i].quantity * FOOD_SCALE / 2) + 10)
+			dist < ((food_list[i].quantity * FOOD_SCALE / 2) + 20)
 		   )
 		{
 
