@@ -24,7 +24,7 @@
 #define MAX_FOOD_QUANTITY		10	//numero massimo di cibo per pila
 #define FOOD_SCALE              8   // radius = quantity * scale	
 
-#define NUM_ANTS				20		//numero di formiche normali
+#define NUM_ANTS				1		//numero di formiche normali
 #define DELTA_ANGLE				5		//max angle deviation
 #define DELTA_SPEED				0.1		//max_speed deviation
 #define ANT_PERIOD				0.02
@@ -43,7 +43,8 @@
 
 #define	NUM_SCOUTS				5
 
-
+#define ANT_TYPE_SCOUT          0
+#define ANT_TYPE_WORKER         1
 
 
 // formula: odor = (base_odor * odor_scale)/ant_distance_from_food^2
@@ -55,14 +56,16 @@
 
 struct food_t
 {
-	int 	x;						//center coord
-	int 	y;						//center coord
+	float 	x;						//center coord
+	float 	y;						//center coord
 	int 	quantity;
 
 };
 
 struct ant_t
 {
+	int     type;
+
 	float 	x, y;
 	float 	speed;
 	float	angle;
@@ -209,11 +212,13 @@ int i, j;
 
 	food_x = mouse_x;
 	food_y = mouse_y;
-	if (food_x < (BACKGROUND_WIDTH - FOOD_BASE_RADIUS) && 
-		food_y > (WINDOW_HEIGHT - BACKGROUND_HEIGHT + FOOD_BASE_RADIUS) &&
-		food_x > FOOD_BASE_RADIUS && 
-		food_y < (WINDOW_HEIGHT - FOOD_BASE_RADIUS))
-			should_put_food = (!(mouse_prev & 1) && (mouse_b & 1));
+	if (
+		(food_x < (BACKGROUND_WIDTH - FOOD_BASE_RADIUS) && food_x > FOOD_BASE_RADIUS) && 
+		(food_y < (BACKGROUND_HEIGHT - FOOD_BASE_RADIUS) && food_y > FOOD_BASE_RADIUS)
+		)
+	{
+		should_put_food = (!(mouse_prev & 1) && (mouse_b & 1));
+	}
 
 	mouse_prev = mouse_b;
 
@@ -353,11 +358,11 @@ char get_scan_code(void)
 
 void * ant_task(void * arg)
 {
-float	da, vx, vy;
+float	da, vx, vy, i;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
-
+	ant->type = ANT_TYPE_WORKER;
 	ant->x = nest.x; 
 	ant->y = nest.y; 
 	ant->speed = ANT_SPEED;
@@ -378,14 +383,12 @@ struct ant_t * ant = &ant_list[tp->arg];
 		// se sono nel nido 
 		if (ant->inside_nest)
 		{
-			
 			// e ci sono feromoni accanto
 			follow_trail(ant);
 
 			if (ant->following_trail)
 			{	// esci
 				ant->inside_nest = false;
-				printf("seguo traccia\n");
 			}
 		}
 		else
@@ -419,11 +422,13 @@ struct ant_t * ant = &ant_list[tp->arg];
 				ant->angle += M_PI;
 
 				// segui la scia verso il cibo
-				follow_trail(ant);			
+				follow_trail(ant);
+
+				look_for_food(ant);			
 			}
 			
-			// se non ho cibo e sono su una scia
-			if (!ant->carrying_food && ant->following_trail)
+			// se non ho cibo
+			if (!ant->carrying_food)
 			{
 				// segui la scia
 				follow_trail(ant);
@@ -435,8 +440,6 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 					if (look_for_food(ant))
 					{
-						printf("mi sono girato\n");
-
 						// girati
 						ant->angle += M_PI;
 
@@ -506,7 +509,7 @@ BITMAP * nest_image;
 
 		clear_to_color(buffer, 0);
 
-		draw_sprite(buffer, ground, 0, WINDOW_HEIGHT - BACKGROUND_HEIGHT);
+		draw_sprite(buffer, ground, 0, 0);
 
 		draw_pheromone();
 
@@ -546,7 +549,7 @@ float 	r;
 void put_nest(void)
 {
 	nest.x = BACKGROUND_WIDTH / 2;
-	nest.y = (WINDOW_HEIGHT - BACKGROUND_HEIGHT) + BACKGROUND_HEIGHT / 2;
+	nest.y = BACKGROUND_HEIGHT / 2;
 }
 
 //---------------------------------------------------------------------
@@ -556,7 +559,7 @@ void put_nest(void)
 
 void bounce(struct ant_t * ant)
 {
-	if (ant->x <= ANT_RADIUS)
+	if (ant->x < ANT_RADIUS)
 	{
 		ant->angle +=deg_to_rad(90);
 	}
@@ -566,12 +569,12 @@ void bounce(struct ant_t * ant)
 		ant->angle -= deg_to_rad(90);
 	}
 
-	if (ant->y < (WINDOW_HEIGHT - BACKGROUND_HEIGHT + ANT_RADIUS))
+	if (ant->y < ANT_RADIUS)
 	{
 		ant->angle += deg_to_rad(90);
 	}
 
-	if (ant->y > WINDOW_HEIGHT - ANT_RADIUS * 2)
+	if (ant->y > (BACKGROUND_HEIGHT - ANT_RADIUS))
 	{
 		ant->angle -= deg_to_rad(90);
 	}
@@ -613,6 +616,12 @@ int i;
 	{
 	float dist = distance(ant, food_list[i].x, food_list[i].y);
 
+		if (ant->type == ANT_TYPE_WORKER)
+		{
+			printf("looking: %f\t\t%f\t\t%f\n", ant->x, ant->y, dist);
+			printf("food   : %f\t\t%f\n", food_list[i].x, food_list[i].y);
+		}
+
 		if (food_list[i].quantity > 0 && 
 			dist < (food_list[i].quantity * FOOD_SCALE / 2)
 		   )
@@ -625,14 +634,8 @@ int i;
 
 			food_list[i].quantity--;
 
-			
 			return true;
 		}
-
-		/*if(food_list[i].quantity == 0)
-		{
-			counter_food_found--;
-		}*/
 	}
 
 	return false;
@@ -644,7 +647,7 @@ bool look_for_trail(struct ant_t * ant)
 int dx, dy, x, y;
 
 	x = ant->x / CELL_SIDE;
-	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
+	y = ant->y / CELL_SIDE;
 
 	for (dx = x - 1; dx <= x + 1; dx++)
 	{
@@ -712,14 +715,14 @@ int radius;
 	}
 
 	for (i = 0; i < MAX_FOOD_NUM; i++)
-			if (food_list[i].quantity > 0)
-			{
-				radius = (food_list[i].quantity * FOOD_SCALE) / 2;
+		if (food_list[i].quantity > 0)
+		{
+			radius = (food_list[i].quantity * FOOD_SCALE) / 2;
 
-				stretch_sprite(buffer, food, 
-					food_list[i].x - radius, food_list[i].y - radius,
-					radius * 2, radius * 2);	
-			}
+			stretch_sprite(buffer, food, 
+				food_list[i].x - radius, food_list[i].y - radius,
+				radius * 2, radius * 2);	
+		}
 			
 				
 }
@@ -757,8 +760,7 @@ int i, j;
 		for (j = 0; j < Y_NUM_CELL; j++)
 		{
 			grid[i][j].x = i * CELL_SIDE + CELL_SIDE / 2;
-			grid[i][j].y = j * CELL_SIDE + CELL_SIDE / 2 + 
-			                   (WINDOW_HEIGHT - BACKGROUND_HEIGHT);
+			grid[i][j].y = j * CELL_SIDE + CELL_SIDE / 2;
 			grid[i][j].odor_intensity = 0;
 		}
 }
@@ -767,7 +769,7 @@ void release_pheromone(struct ant_t * ant)
 {
 int x, y;
 	x = ant->x / CELL_SIDE;
-	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
+	y = ant->y / CELL_SIDE;
 
 	if (grid[x][y].odor_intensity < MAX_PHEROMONE_INTENSITY)
 		grid[x][y].odor_intensity += ant->pheromone_intensity;
@@ -815,13 +817,13 @@ float angles[] = { ant->angle, ant->angle - M_PI / 4, ant->angle + M_PI / 4,
                                ant->angle - M_PI / 2, ant->angle + M_PI / 2 };
 
 	x = ant->x / CELL_SIDE;
-	y = (ant->y - (WINDOW_HEIGHT - BACKGROUND_HEIGHT)) / CELL_SIDE;
+	y = ant->y / CELL_SIDE;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 5; i++)
 	{
 		// indici della cella davanti a me
-		cx = x + (int)(1.5 * cos(angles[i]));
-		cy = y + (int)(1.5 * sin(angles[i]));
+		cx = x + (int)(1.9 * cos(angles[i]));
+		cy = y + (int)(1.9 * sin(angles[i]));
 
 		if (cx == x && cy == y)
 			continue;
@@ -848,11 +850,12 @@ bool found_food = false;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * scout = &scout_list[tp->arg];
 
+	scout->type = ANT_TYPE_SCOUT;
 	scout->x = nest.x; 
 	scout->y = nest.y; 
 	scout->speed = ANT_SPEED;
 	scout->angle = deg_to_rad(frand(0,360));
-	scout->pheromone_intensity = 10;
+	scout->pheromone_intensity = PHEROMONE_INTENSITY;
 
 	scout->following_trail = false;
 	scout->carrying_food = false;
@@ -969,8 +972,8 @@ BITMAP * ant;
 BITMAP * ant_food;
 float angle;
 
-	ant = load_bitmap("ant.bmp", NULL);
-	ant_food = load_bitmap("ant_food.bmp", NULL);
+	ant = load_bitmap("scout.bmp", NULL);
+	ant_food = load_bitmap("scout.bmp", NULL);
 
 	if (ant == NULL)
 	{
@@ -985,11 +988,15 @@ float angle;
 		angle = ((rad_to_deg(scout_list[i].angle + M_PI_2) * 256 / 360));
 
 		if(!scout_list[i].carrying_food)
+		{
 			rotate_sprite(buffer, ant, scout_list[i].x - ANT_RADIUS, 
 				        scout_list[i].y - ANT_RADIUS, ftofix(angle));
+		}
 		else
+		{
 			rotate_sprite(buffer, ant_food, scout_list[i].x - ANT_RADIUS, 
 				        scout_list[i].y - ANT_RADIUS, ftofix(angle));
+		}
 	
 	}
 }
