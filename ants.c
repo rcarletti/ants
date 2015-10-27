@@ -70,6 +70,7 @@ struct ant_t
 
 	bool 	found_food, carrying_food, following_trail;
 	float   food_x, food_y;
+	bool 	inside_nest;
 };
 
 
@@ -325,7 +326,7 @@ int j;
 	for(j = 0; j < NUM_ANTS; j++)
 	{
 		tp[nAnts].arg = nAnts;
-		tp[nAnts].period = 60;
+		tp[nAnts].period = 20;
 		tp[nAnts].deadline = 100;
 		tp[nAnts].priority = 10;
 
@@ -363,6 +364,7 @@ struct ant_t * ant = &ant_list[tp->arg];
 	ant->angle = deg_to_rad(frand(0,360));
 	ant->pheromone_intensity = PHEROMONE_INTENSITY;
 
+	ant->inside_nest = true;
 	ant->following_trail = false;
 	ant->carrying_food = false;
 
@@ -373,104 +375,101 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 	bool at_home = check_nest(ant);
 
-
-			pthread_mutex_lock(&scout_mutex);
-			while (counter_food_found == 0)
-			{		
-				pthread_cond_wait(&scout_condition, &scout_mutex);
-			}
-			pthread_mutex_unlock(&scout_mutex);
-
-
-		// se non ho cibo e non sono su una scia
-		if (!at_home && !ant->carrying_food && !ant->following_trail)
+		// se sono nel nido 
+		if (ant->inside_nest)
 		{
-			// vaga a caso e cerca una scia
+			
+			// e ci sono feromoni accanto
 			follow_trail(ant);
 
-			if (!ant->following_trail)
+			if (ant->following_trail)
+			{	// esci
+				ant->inside_nest = false;
+				printf("seguo traccia\n");
+			}
+		}
+		else
+		{
+			// sono al nido senza cibo
+			if (at_home && !ant->carrying_food)
 			{
-				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-				ant->angle += da;
+				// cerca la scia
+				follow_trail(ant);
+
+				int i = 10;
+				while (i > 0 && !ant->following_trail)
+				{
+					ant->angle += M_PI_2;
+					follow_trail(ant);
+					i--;
+				}
+
+				// se non la trovi dopo un po', entra nel nido
+				if (i == 0)
+					ant->inside_nest = true;
 			}
 
-			// e rilascia feromone per trovare la scia
-			release_pheromone(ant);
-
-			// nel frattempo controlla se c'è cibo
-			if (look_for_food(ant))
+			// se arrivo a casa con del cibo
+			if (at_home && ant->carrying_food)
 			{
+				// deposita il cibo
+				ant->carrying_food = false;
+
 				// girati
 				ant->angle += M_PI;
 
+				// segui la scia verso il cibo
+				follow_trail(ant);			
+			}
+			
+			// se non ho cibo e sono su una scia
+			if (!ant->carrying_food && ant->following_trail)
+			{
+				// segui la scia
+				follow_trail(ant);
+
+				// e cerca cibo
+				if (sense_food(ant))
+				{
+					release_pheromone(ant);
+
+					if (look_for_food(ant))
+					{
+						printf("mi sono girato\n");
+
+						// girati
+						ant->angle += M_PI;
+
+						// segui la scia verso casa
+						follow_trail(ant);
+					}	
+				}
+			}
+
+			// se sto trasportando cibo
+			if (ant->carrying_food)
+			{
 				// segui la scia verso casa
 				follow_trail(ant);
-			}
-		}
-		
-		// se non ho cibo e sono su una scia
-		if (!ant->carrying_food && ant->following_trail)
-		{
-			// segui la scia
-			follow_trail(ant);
 
-			// e rilascia feromone per rinforzare la scia
-			release_pheromone(ant);
-		}
-
-		// se arrivo a casa senza cibo
-		if (at_home && !ant->carrying_food && ant->following_trail)
-		{
-			// girati
-			ant->angle += M_PI;
-
-			// segui la scia verso il cibo
-			follow_trail(ant);
-		}
-
-		// se sto trasportando cibo
-		if (ant->carrying_food)
-		{
-			// segui la scia verso casa
-			follow_trail(ant);
-
-			if (!ant->following_trail)
-			{
-				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-				ant->angle += da;
+				// rilascia più feromone
+				release_pheromone(ant);
 			}
 
-			// rilascia più feromone
-			release_pheromone(ant);
+			// aggiorna velocità e posizione
+			vx = ant->speed * cos(ant->angle);
+			vy = ant->speed * sin(ant->angle);
+
+			ant->x += vx * ANT_PERIOD;
+			ant->y += vy * ANT_PERIOD;
+
+			bounce(ant);
 		}
-
-		// se arrivo a casa con del cibo
-		if (at_home && ant->carrying_food)
-		{
-			// deposita il cibo
-			ant->carrying_food = false;
-
-			// girati
-			ant->angle += M_PI;
-
-			// segui la scia verso il cibo
-			follow_trail(ant);			
-		}
-
-		// aggiorna velocità e posizione
-		vx = ant->speed * cos(ant->angle);
-		vy = ant->speed * sin(ant->angle);
-
-		ant->x += vx * ANT_PERIOD;
-		ant->y += vy * ANT_PERIOD;
-
-		bounce(ant);
 
 		if (deadline_miss(tp)) printf("deadline miss ant\n");
 		wait_for_period(tp);
 	}
 } 
-
 
 //----------------------------------------------------------------------
 // UPDATE GRAPHIC
@@ -655,6 +654,7 @@ int dx, dy, x, y;
 			{
 				head_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
 				ant->following_trail = true;
+				printf("trovata\n");
 
 				return true;
 			}		
@@ -691,7 +691,7 @@ float dx, dy, alpha;
 
 bool check_nest(struct ant_t * ant)
 {
-	if (distance(ant, nest.x, nest.y) < NEST_RADIUS)
+	if (distance(ant, nest.x, nest.y) < 3)
 		return true;
 
 	return false;
