@@ -24,8 +24,8 @@
 #define MAX_FOOD_QUANTITY		10	//numero massimo di cibo per pila
 #define FOOD_SCALE              8   // radius = quantity * scale	
 
-#define NUM_ANTS				1		//numero di formiche normali
-#define DELTA_ANGLE				5		//max angle deviation
+#define NUM_ANTS				20		//numero di formiche normali
+#define DELTA_ANGLE				3		//max angle deviation
 #define DELTA_SPEED				0.1		//max_speed deviation
 #define ANT_PERIOD				0.02
 #define ANT_SPEED				20 
@@ -33,9 +33,9 @@
 
 #define NEST_RADIUS				40
 
-#define MAX_PHEROMONE_INTENSITY 10
-#define PHEROMONE_INTENSITY     0.1
-#define PHEROMONE_TASK_PERIOD   20000
+#define MAX_PHEROMONE_INTENSITY 15
+#define PHEROMONE_INTENSITY     1.5
+#define PHEROMONE_TASK_PERIOD  	5000
 
 #define CELL_SIDE				10
 #define X_NUM_CELL				(int)BACKGROUND_WIDTH / CELL_SIDE
@@ -413,7 +413,7 @@ struct ant_t * ant = &ant_list[tp->arg];
 			}
 
 			// se arrivo a casa con del cibo
-			if (at_home && ant->carrying_food)
+			if (check_nest(ant) && ant->carrying_food)
 			{
 				// deposita il cibo
 				ant->carrying_food = false;
@@ -421,8 +421,6 @@ struct ant_t * ant = &ant_list[tp->arg];
 				// girati
 				ant->angle += M_PI;
 
-				// segui la scia verso il cibo
-				follow_trail(ant);
 
 				look_for_food(ant);			
 			}
@@ -467,6 +465,12 @@ struct ant_t * ant = &ant_list[tp->arg];
 			ant->y += vy * ANT_PERIOD;
 
 			bounce(ant);
+
+			if(!ant->following_trail)
+			{
+				ant->angle += M_PI;
+				follow_trail(ant);
+			}
 		}
 
 		if (deadline_miss(tp)) printf("deadline miss ant\n");
@@ -694,7 +698,7 @@ float dx, dy, alpha;
 
 bool check_nest(struct ant_t * ant)
 {
-	if (distance(ant, nest.x, nest.y) < 3)
+	if (distance(ant, nest.x, nest.y) < 7)
 		return true;
 
 	return false;
@@ -731,6 +735,7 @@ void draw_ants(void)
 {
 int i;
 BITMAP * ant;
+BITMAP * ant_food;
 float angle;
 
 	ant = load_bitmap("ant.bmp", NULL);
@@ -741,13 +746,26 @@ float angle;
 		exit(1);
 	}
 
+	ant_food = load_bitmap("ant_food.bmp", NULL);
+
+	if (ant_food == NULL)
+	{
+		printf("errore ant_food \n");
+		exit(1);
+	}
+
 	for (i = 0; i < NUM_ANTS; i++)
 		{
 			//converting degrees in allegro-degrees
 			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
 
+			if  (!ant_list[i].carrying_food)
 				rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
-				              ant_list[i].y - ANT_RADIUS, ftofix(angle));			
+				              ant_list[i].y - ANT_RADIUS, ftofix(angle));
+			else
+				rotate_sprite(buffer, ant_food, ant_list[i].x - ANT_RADIUS, 
+				              ant_list[i].y - ANT_RADIUS, ftofix(angle));
+
 
 		}
 }
@@ -899,19 +917,8 @@ struct ant_t * scout = &scout_list[tp->arg];
 		if (scout->carrying_food)
 		{
 		    // Se sono arrivato, poso la roba e torno al cibo
-		    if (at_home)
+		    if (check_nest(scout))
 		    {
-		    	if(found_food == true)
-		    	{
-		    		//se ho riportato cibo al nido posso risvegliare le altre formiche
-		    		found_food = false;
-
-		    		pthread_mutex_lock(&scout_mutex);
-		    		counter_food_found++;
-		    		pthread_mutex_unlock(&scout_mutex);
-		    		pthread_cond_broadcast(&scout_condition);
-
-		    	}
     			// deposita il cibo
     			scout->carrying_food = false;
     
