@@ -25,7 +25,7 @@
 #define FOOD_SCALE              8   // radius = quantity * scale	
 
 #define NUM_ANTS				20		//numero di formiche normali
-#define DELTA_ANGLE				3		//max angle deviation
+#define DELTA_ANGLE				5		//max angle deviation
 #define DELTA_SPEED				0.1		//max_speed deviation
 #define ANT_PERIOD				0.02
 #define ANT_SPEED				20 
@@ -34,7 +34,7 @@
 #define NEST_RADIUS				40
 
 #define MAX_PHEROMONE_INTENSITY 15
-#define PHEROMONE_INTENSITY     1.5
+#define PHEROMONE_INTENSITY     3
 #define PHEROMONE_TASK_PERIOD  	5000
 
 #define CELL_SIDE				10
@@ -46,6 +46,9 @@
 #define ANT_TYPE_SCOUT          0
 #define ANT_TYPE_WORKER         1
 
+#define MAX_NEST_SCENT			50
+
+
 
 // formula: odor = (base_odor * odor_scale)/ant_distance_from_food^2
 
@@ -53,6 +56,16 @@
 //---------------------------------------------------------------------------
 //TYPE DEFINITIONS
 //---------------------------------------------------------------------------
+enum state_t
+{
+	ANT_IDLE, 
+	ANT_TOWARDS_FOOD, 
+	ANT_TOWARDS_HOME_NO_FOOD, 
+	ANT_TOWARDS_HOME_WITH_FOOD,
+	ANT_TOWARDS_UNKNOWN,
+	ANT_RANDOM_MOVEMENT
+};
+
 
 struct food_t
 {
@@ -71,6 +84,8 @@ struct ant_t
 	float	angle;
 	float   pheromone_intensity;
 
+	enum state_t state;
+
 	bool 	found_food, carrying_food, following_trail;
 	float   food_x, food_y;
 	bool 	inside_nest;
@@ -88,6 +103,7 @@ struct cell_t
 	float x;			//center of the cell
 	float y;
 	float odor_intensity;
+	float nest_scent;
 };
 
 //---------------------------------------------------------------------------
@@ -119,9 +135,10 @@ float rad_to_deg(float);
 
 bool look_for_food(struct ant_t *);
 bool look_for_trail(struct ant_t *);
-float distance(struct ant_t *, float, float);
+float distance(float, float, float, float);
 
 void head_towards(struct ant_t *, float, float);
+bool sense_nest(struct ant_t *);
 bool check_nest(struct ant_t *);
 
 void setup_grid(void);
@@ -206,7 +223,7 @@ void process_inputs(void)
 {
 char	  scan;
 const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
-int i, j;
+int i;
 
 	// mouse
 
@@ -363,6 +380,7 @@ struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
 	ant->type = ANT_TYPE_WORKER;
+	ant->state = ANT_IDLE;
 	ant->x = nest.x; 
 	ant->y = nest.y; 
 	ant->speed = ANT_SPEED;
@@ -375,88 +393,100 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 	set_period(tp);
 
+	// caso 1: fine della scia mentre cerchi cibo
+
 	while(1)
 	{
-
-	bool at_home = check_nest(ant);
-
-		// se sono nel nido 
-		if (ant->inside_nest)
+		switch (ant->state)
 		{
+		case ANT_IDLE:
 			// e ci sono feromoni accanto
 			follow_trail(ant);
 
-			if (ant->following_trail)
-			{	// esci
-				ant->inside_nest = false;
-			}
-		}
-		else
-		{
-			// sono al nido senza cibo
-			if (at_home && !ant->carrying_food)
+			if (ant->following_trail) 
+				ant->state = ANT_TOWARDS_FOOD;
+
+			break;
+
+		case ANT_TOWARDS_FOOD:
+			if (sense_food(ant) && look_for_food(ant))
 			{
-				// cerca la scia
-				follow_trail(ant);
-
-				int i = 10;
-				while (i > 0 && !ant->following_trail)
-				{
-					ant->angle += M_PI_2;
-					follow_trail(ant);
-					i--;
-				}
-
-				// se non la trovi dopo un po', entra nel nido
-				if (i == 0)
-					ant->inside_nest = true;
-			}
-
-			// se arrivo a casa con del cibo
-			if (check_nest(ant) && ant->carrying_food)
-			{
-				// deposita il cibo
-				ant->carrying_food = false;
-
-				// girati
 				ant->angle += M_PI;
 
-
-				look_for_food(ant);			
-			}
-			
-			// se non ho cibo
-			if (!ant->carrying_food)
-			{
-				// segui la scia
 				follow_trail(ant);
 
-				// e cerca cibo
-				if (sense_food(ant))
-				{
-					release_pheromone(ant);
-
-					if (look_for_food(ant))
-					{
-						// girati
-						ant->angle += M_PI;
-
-						// segui la scia verso casa
-						follow_trail(ant);
-					}	
-				}
+				if (ant->following_trail)
+					ant->state = ANT_TOWARDS_HOME_WITH_FOOD;
+				else
+					ant->state = ANT_RANDOM_MOVEMENT;
+			}
+			else if (0 /* sono dove dovrebbe esserci dle cibo */)
+			{
+				/* CASO 1 */
+			}
+			else
+			{
+				follow_trail(ant);
 			}
 
-			// se sto trasportando cibo
-			if (ant->carrying_food)
+			break;
+
+		case ANT_TOWARDS_HOME_NO_FOOD:
+
+			break;
+
+		case ANT_TOWARDS_HOME_WITH_FOOD:
+			release_pheromone(ant);
+
+			if (sense_nest(ant) && check_nest(ant))
 			{
-				// segui la scia verso casa
+				ant->carrying_food = false;
+
+				ant->angle += M_PI;
+
 				follow_trail(ant);
 
-				// rilascia più feromone
-				release_pheromone(ant);
+				if (ant->following_trail)
+					ant->state = ANT_TOWARDS_FOOD;
+				else
+					ant->state = ANT_RANDOM_MOVEMENT;
+			}
+			else 
+			{
+				follow_trail(ant);
 			}
 
+			break;
+
+		case ANT_TOWARDS_UNKNOWN:
+			if (sense_nest(ant) && check_nest(ant))
+			{
+				ant->carrying_food = false;
+				ant->state = ANT_IDLE;
+			}
+			else if (sense_food(ant))
+				ant->state = ANT_TOWARDS_FOOD;
+
+			break;
+
+		case ANT_RANDOM_MOVEMENT:
+			ant->angle += deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+
+			follow_trail(ant);
+
+			if (ant->following_trail)
+				ant->state = ANT_TOWARDS_UNKNOWN;
+			else if (sense_nest(ant) && check_nest(ant))
+			{
+				ant->carrying_food = false;
+				ant->state = ANT_IDLE;
+			}
+
+			break;
+		}
+
+		if (ant->state != ANT_IDLE)
+		{
 			// aggiorna velocità e posizione
 			vx = ant->speed * cos(ant->angle);
 			vy = ant->speed * sin(ant->angle);
@@ -465,12 +495,6 @@ struct ant_t * ant = &ant_list[tp->arg];
 			ant->y += vy * ANT_PERIOD;
 
 			bounce(ant);
-
-			if(!ant->following_trail)
-			{
-				ant->angle += M_PI;
-				follow_trail(ant);
-			}
 		}
 
 		if (deadline_miss(tp)) printf("deadline miss ant\n");
@@ -552,8 +576,12 @@ float 	r;
 
 void put_nest(void)
 {
+int i,j;
 	nest.x = BACKGROUND_WIDTH / 2;
 	nest.y = BACKGROUND_HEIGHT / 2;
+	for (i = 0; i < X_NUM_CELL; i++)
+		for(j = 0; j <  Y_NUM_CELL; j++)
+			grid[i][j].nest_scent = MAX_NEST_SCENT - distance(nest.x, nest.y, grid[i][j].x, grid[i][j].y);
 }
 
 //---------------------------------------------------------------------
@@ -618,13 +646,7 @@ int i;
 
 	for (i = 0; i < MAX_FOOD_NUM; i++)
 	{
-	float dist = distance(ant, food_list[i].x, food_list[i].y);
-
-		if (ant->type == ANT_TYPE_WORKER)
-		{
-			printf("looking: %f\t\t%f\t\t%f\n", ant->x, ant->y, dist);
-			printf("food   : %f\t\t%f\n", food_list[i].x, food_list[i].y);
-		}
+	float dist = distance(ant->x, ant->y, food_list[i].x, food_list[i].y);
 
 		if (food_list[i].quantity > 0 && 
 			dist < (food_list[i].quantity * FOOD_SCALE / 2)
@@ -646,42 +668,18 @@ int i;
 }
 
 
-bool look_for_trail(struct ant_t * ant)
-{
-int dx, dy, x, y;
-
-	x = ant->x / CELL_SIDE;
-	y = ant->y / CELL_SIDE;
-
-	for (dx = x - 1; dx <= x + 1; dx++)
-	{
-		for (dy = y - 1; dy <= y + 1; dy++)
-		{
-			if (dx != x && dy != y && grid[dx][dy].odor_intensity > 0)
-			{
-				head_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
-				ant->following_trail = true;
-				printf("trovata\n");
-
-				return true;
-			}		
-		}
-	}
-
-	return false;
-}
 
 //---------------------------------------------------------------------
 //
 //---------------------------------------------------------------------
 
 
-float distance(struct ant_t * ant, float x, float y)
+float distance(float x_s,float y_s, float x_d, float y_d)
 {
 int distance_x, distance_y, distance;
 
-	distance_x = ((ant->x - x) * (ant->x - x));
-	distance_y = ((ant->y - y) * (ant->y - y));
+	distance_x = ((x_s - x_d) * (x_s - x_d));
+	distance_y = ((y_s - y_d) * (y_s - y_d));
 	distance = sqrt(distance_y + distance_x);
 	return distance;
 }
@@ -696,9 +694,20 @@ float dx, dy, alpha;
 		ant->angle = alpha;
 }
 
+bool sense_nest(struct ant_t * ant)
+{
+	if (distance(ant->x, ant->y, nest.x, nest.y) < 40)
+	{
+		head_towards(ant, nest.x, nest.y);
+		return true;
+	}
+
+	return false;
+}
+
 bool check_nest(struct ant_t * ant)
 {
-	if (distance(ant, nest.x, nest.y) < 7)
+	if (distance(ant->x, ant->y, nest.x, nest.y) < 5)
 		return true;
 
 	return false;
@@ -837,7 +846,7 @@ float angles[] = { ant->angle, ant->angle - M_PI / 4, ant->angle + M_PI / 4,
 	x = ant->x / CELL_SIDE;
 	y = ant->y / CELL_SIDE;
 
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 3; i++)
 	{
 		// indici della cella davanti a me
 		cx = x + (int)(1.9 * cos(angles[i]));
@@ -892,9 +901,6 @@ struct ant_t * scout = &scout_list[tp->arg];
 		    // Se rilevo cibo vicino
 		    if (sense_food(scout))
 		    {
-		        // Inizio a rilasciare feromone
-		        release_pheromone(scout);
-		        
 		        // Se ci sono sopra
     		    if (look_for_food(scout))
                 {
@@ -1014,7 +1020,7 @@ bool sense_food(struct ant_t * ant)
 
 	for (i = 0; i < MAX_FOOD_NUM; i++)
 	{
-	float dist = distance(ant, food_list[i].x, food_list[i].y);
+	float dist = distance(ant->x,ant->y, food_list[i].x, food_list[i].y);
 
 		if (food_list[i].quantity > 0 && 
 			dist < ((food_list[i].quantity * FOOD_SCALE / 2) + 20)
@@ -1031,3 +1037,21 @@ bool sense_food(struct ant_t * ant)
 
 	return false;
 }
+
+void follow_scent(struct ant_t * ant)
+{
+int x, y, i, j;
+int dx, dy;
+
+	x = ant->x / CELL_SIDE;
+	y = ant->y / CELL_SIDE;
+
+	for (dx =  x - i; dx < x + i; i++)
+		for(dy = y - i; dy < y + i; dy++)
+			if(grid[dx][dy].nest_scent > grid[x][y].nest_scent)
+				head_towards(ant, grid[x][y].x, grid[x][y].y);
+
+
+}
+
+	
