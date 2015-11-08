@@ -24,7 +24,7 @@
 #define MAX_FOOD_QUANTITY		10	//numero massimo di cibo per pila
 #define FOOD_SCALE              8   // radius = quantity * scale	
 
-#define NUM_ANTS				20		//numero di formiche normali
+#define NUM_ANTS				10		//numero di formiche normali
 #define DELTA_ANGLE				5		//max angle deviation
 #define DELTA_SPEED				0.1		//max_speed deviation
 #define ANT_PERIOD				0.02
@@ -89,6 +89,8 @@ struct ant_t
 	bool 	found_food, carrying_food, following_trail;
 	float   food_x, food_y;
 	bool 	inside_nest;
+
+	struct timespec last_release;
 };
 
 
@@ -386,6 +388,7 @@ struct ant_t * ant = &ant_list[tp->arg];
 	ant->speed = ANT_SPEED;
 	ant->angle = deg_to_rad(frand(0,360));
 	ant->pheromone_intensity = PHEROMONE_INTENSITY;
+	ant->last_release.tv_sec = 0;
 
 	ant->inside_nest = true;
 	ant->following_trail = false;
@@ -409,24 +412,25 @@ struct ant_t * ant = &ant_list[tp->arg];
 			break;
 
 		case ANT_TOWARDS_FOOD:
-			if (sense_food(ant) && look_for_food(ant))
+			if (!sense_food(ant))
 			{
-				ant->angle += M_PI;
-
+				if (0 /* sono dove dovrebbe esserci dle cibo */)
+				{
+					/* fai qualcosa */
+				}
+				else
+				{
+					follow_trail(ant);
+				}
+			}
+			else if (look_for_food(ant))
+			{
 				follow_trail(ant);
 
 				if (ant->following_trail)
 					ant->state = ANT_TOWARDS_HOME_WITH_FOOD;
 				else
 					ant->state = ANT_RANDOM_MOVEMENT;
-			}
-			else if (0 /* sono dove dovrebbe esserci dle cibo */)
-			{
-				/* CASO 1 */
-			}
-			else
-			{
-				follow_trail(ant);
 			}
 
 			break;
@@ -438,11 +442,13 @@ struct ant_t * ant = &ant_list[tp->arg];
 		case ANT_TOWARDS_HOME_WITH_FOOD:
 			release_pheromone(ant);
 
-			if (sense_nest(ant) && check_nest(ant))
+			if (!sense_nest(ant))
+			{
+				follow_trail(ant);
+			}
+			else if (check_nest(ant))
 			{
 				ant->carrying_food = false;
-
-				ant->angle += M_PI;
 
 				follow_trail(ant);
 
@@ -450,10 +456,6 @@ struct ant_t * ant = &ant_list[tp->arg];
 					ant->state = ANT_TOWARDS_FOOD;
 				else
 					ant->state = ANT_RANDOM_MOVEMENT;
-			}
-			else 
-			{
-				follow_trail(ant);
 			}
 
 			break;
@@ -684,14 +686,18 @@ int distance_x, distance_y, distance;
 	return distance;
 }
 
+float angle_towards(struct ant_t * ant, float x, float y)
+{
+float dx, dy;
+
+	dx = (x - ant->x);
+	dy = (y - ant->y);
+	return atan2(dy,dx);
+}
+
 void head_towards(struct ant_t * ant, float x, float y)
 {
-float dx, dy, alpha;
-
-		dx = (x - ant->x);
-		dy = (y - ant->y);
-		alpha = atan2(dy,dx) ;
-		ant->angle = alpha;
+	ant->angle = angle_towards(ant, x, y);
 }
 
 bool sense_nest(struct ant_t * ant)
@@ -795,11 +801,21 @@ int i, j;
 void release_pheromone(struct ant_t * ant)
 {
 int x, y;
+struct timespec t;
+
 	x = ant->x / CELL_SIDE;
 	y = ant->y / CELL_SIDE;
 
-	if (grid[x][y].odor_intensity < MAX_PHEROMONE_INTENSITY)
-		grid[x][y].odor_intensity += ant->pheromone_intensity;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+
+	if ((t.tv_sec - ant->last_release.tv_sec) > -1)
+	{
+		if (grid[x][y].odor_intensity < MAX_PHEROMONE_INTENSITY)
+			grid[x][y].odor_intensity += ant->pheromone_intensity;
+
+		ant->last_release = t;
+	}
+	
 }
 
 void draw_pheromone(void)
@@ -829,7 +845,7 @@ struct task_par *tp = (struct task_par *) arg;
 		for (i = 0; i < X_NUM_CELL; i++)
 			for (j = 0; j < Y_NUM_CELL; j++)
 				if (grid[i][j].odor_intensity > 0)
-					grid[i][j].odor_intensity -= PHEROMONE_INTENSITY;
+					grid[i][j].odor_intensity -= 0.2;
 
 	if (deadline_miss(tp)) printf("deadline miss gfx\n");
 		wait_for_period(tp);
@@ -838,34 +854,58 @@ struct task_par *tp = (struct task_par *) arg;
 
 void follow_trail(struct ant_t * ant)
 {
-int cx, cy, x, y, i;
-
-float angles[] = { ant->angle, ant->angle - M_PI / 4, ant->angle + M_PI / 4,
-                               ant->angle - M_PI / 2, ant->angle + M_PI / 2 };
+int cx, cy, dx, dy, x, y, i;
+float start_angle, curr_diff;
 
 	x = ant->x / CELL_SIDE;
 	y = ant->y / CELL_SIDE;
 
-	for (i = 0; i < 3; i++)
+	start_angle = ant->angle;
+	curr_diff = M_PI * 2;
+
+	ant->following_trail = false;
+
+	if (ant->type == ANT_TYPE_WORKER)
 	{
-		// indici della cella davanti a me
-		cx = x + (int)(1.9 * cos(angles[i]));
-		cy = y + (int)(1.9 * sin(angles[i]));
 
-		if (cx == x && cy == y)
-			continue;
-
-		if (grid[cx][cy].odor_intensity > 0)
-		{
-			head_towards(ant, grid[cx][cy].x, grid[cx][cy].y);
-			ant->following_trail = true;
-
-			return;
-		}
+	printf("START\n");
+	printf("start_angle: %f\n", start_angle);
 	}
 
-	// se non trovo scie davanti a me, non sto più seguendo
-	ant->following_trail = false;
+	for (dx = x - 3; dx <= x + 3; dx++)
+		for (dy = y - 3; dy <= y + 3; dy++)
+		{
+			if (dx == x && dy == y)
+				continue;
+
+			if (grid[dx][dy].odor_intensity > 0)
+			{
+				float angle = angle_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
+
+				float diff = fabs(atan2(sin(angle - start_angle), cos(angle - start_angle)));
+
+				if (ant->type == ANT_TYPE_WORKER)
+				{
+				printf("found: %f %f\n", grid[dx][dy].x, grid[dx][dy].y);
+				printf("angle: %f diff: %f\n", angle, diff);
+
+				}
+
+				if (diff < curr_diff)
+				{
+					curr_diff = diff;
+					ant->angle = angle;
+					ant->following_trail = true;
+				}
+
+			}
+		}
+
+if (ant->type == ANT_TYPE_WORKER)
+{
+	printf("%d\n", ant->following_trail);
+	printf("END\n");
+}
 }
 
 void * scout_task(void * arg)
