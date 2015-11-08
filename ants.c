@@ -58,7 +58,8 @@
 //---------------------------------------------------------------------------
 enum state_t
 {
-	ANT_IDLE, 
+	ANT_IDLE,
+	ANT_AWAKING,
 	ANT_TOWARDS_FOOD, 
 	ANT_TOWARDS_HOME_NO_FOOD, 
 	ANT_TOWARDS_HOME_WITH_FOOD,
@@ -149,7 +150,7 @@ void release_pheromone(struct ant_t *);
 
 void draw_pheromone(void);
 
-void follow_trail(struct ant_t *);
+bool follow_trail(struct ant_t *);
 
 bool sense_food(struct ant_t *);
 
@@ -198,6 +199,8 @@ pthread_cond_t		scout_condition;
 
 int 				counter_food_found = 0;			//cibi trovati non ancora finiti
 
+struct timespec 	global_t;
+
 
 //---------------------------------------------------------------------------
 //FUNCTION DEFINITIONS
@@ -232,8 +235,8 @@ int i;
 	food_x = mouse_x;
 	food_y = mouse_y;
 	if (
-		(food_x < (BACKGROUND_WIDTH - FOOD_BASE_RADIUS) && food_x > FOOD_BASE_RADIUS) && 
-		(food_y < (BACKGROUND_HEIGHT - FOOD_BASE_RADIUS) && food_y > FOOD_BASE_RADIUS)
+		(food_x < (BACKGROUND_WIDTH - (FOOD_BASE_RADIUS / 2)) && food_x > (FOOD_BASE_RADIUS / 2)) && 
+		(food_y < (BACKGROUND_HEIGHT - (FOOD_BASE_RADIUS / 2)) && food_y > (FOOD_BASE_RADIUS / 2))
 		)
 	{
 		should_put_food = (!(mouse_prev & 1) && (mouse_b & 1));
@@ -347,7 +350,7 @@ int j;
 
 	put_nest();
 
-	for(j = 0; j < NUM_ANTS; j++)
+	for (j = 0; j < NUM_ANTS; j++)
 	{
 		tp[nAnts].arg = nAnts;
 		tp[nAnts].period = 20;
@@ -357,6 +360,12 @@ int j;
 		tid[nAnts] = task_create(ant_task, &tp[nAnts]);
 
 		nAnts++;		
+	}
+
+	for (j = 0; j < MAX_FOOD_NUM; j++)
+	{
+		food_list[j].x = -1;
+		food_list[j].y = -1;
 	}
 
 	
@@ -377,9 +386,13 @@ char get_scan_code(void)
 
 void * ant_task(void * arg)
 {
-float	da, vx, vy, i;
+float	da, vx, vy;
+int i;
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
+
+struct timespec awake_after, t;
+
 
 	ant->type = ANT_TYPE_WORKER;
 	ant->state = ANT_IDLE;
@@ -403,25 +416,32 @@ struct ant_t * ant = &ant_list[tp->arg];
 		switch (ant->state)
 		{
 		case ANT_IDLE:
-			// e ci sono feromoni accanto
-			follow_trail(ant);
 
-			if (ant->following_trail) 
+			if (follow_trail(ant))
+			{
+				clock_gettime(CLOCK_MONOTONIC, &awake_after);
+				time_add_ms(&awake_after, tp->arg * 1000);
+
+				ant->state = ANT_AWAKING;
+			}
+
+			break;
+
+		case ANT_AWAKING:
+
+			clock_gettime(CLOCK_MONOTONIC, &t);
+
+			if (time_cmp(awake_after, t) < 0)
+			{
 				ant->state = ANT_TOWARDS_FOOD;
+			}
 
 			break;
 
 		case ANT_TOWARDS_FOOD:
 			if (!sense_food(ant))
 			{
-				if (0 /* sono dove dovrebbe esserci dle cibo */)
-				{
-					/* fai qualcosa */
-				}
-				else
-				{
-					follow_trail(ant);
-				}
+				follow_trail(ant);
 			}
 			else if (look_for_food(ant))
 			{
@@ -436,6 +456,12 @@ struct ant_t * ant = &ant_list[tp->arg];
 			break;
 
 		case ANT_TOWARDS_HOME_NO_FOOD:
+
+			if (sense_nest(ant) && check_nest(ant))
+				ant->state = ANT_IDLE;
+
+			else 
+				follow_trail(ant);
 
 			break;
 
@@ -487,7 +513,7 @@ struct ant_t * ant = &ant_list[tp->arg];
 			break;
 		}
 
-		if (ant->state != ANT_IDLE)
+		if (ant->state != ANT_IDLE && ant->state != ANT_AWAKING)
 		{
 			// aggiorna velocità e posizione
 			vx = ant->speed * cos(ant->angle);
@@ -550,7 +576,9 @@ BITMAP * nest_image;
 		draw_ants();
 
 		draw_scouts();
-	
+
+
+
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
 		unscare_mouse();
@@ -672,7 +700,7 @@ int i;
 
 
 //---------------------------------------------------------------------
-//
+// calcola la distanza fra due punti
 //---------------------------------------------------------------------
 
 
@@ -771,15 +799,18 @@ float angle;
 
 	for (i = 0; i < NUM_ANTS; i++)
 		{
-			//converting degrees in allegro-degrees
-			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
+			if (ant_list[i].state != ANT_IDLE && ant_list[i].state!= ANT_AWAKING)
+			{
+				//converting degrees in allegro-degrees
+				angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
 
-			if  (!ant_list[i].carrying_food)
-				rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
-				              ant_list[i].y - ANT_RADIUS, ftofix(angle));
-			else
-				rotate_sprite(buffer, ant_food, ant_list[i].x - ANT_RADIUS, 
-				              ant_list[i].y - ANT_RADIUS, ftofix(angle));
+				if  (!ant_list[i].carrying_food)
+					rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
+					              ant_list[i].y - ANT_RADIUS, ftofix(angle));
+				else
+					rotate_sprite(buffer, ant_food, ant_list[i].x - ANT_RADIUS, 
+					              ant_list[i].y - ANT_RADIUS, ftofix(angle));
+			}
 
 
 		}
@@ -845,14 +876,14 @@ struct task_par *tp = (struct task_par *) arg;
 		for (i = 0; i < X_NUM_CELL; i++)
 			for (j = 0; j < Y_NUM_CELL; j++)
 				if (grid[i][j].odor_intensity > 0)
-					grid[i][j].odor_intensity -= 0.2;
+					grid[i][j].odor_intensity -= PHEROMONE_INTENSITY;
 
 	if (deadline_miss(tp)) printf("deadline miss gfx\n");
 		wait_for_period(tp);
 	}
 }
 
-void follow_trail(struct ant_t * ant)
+bool follow_trail(struct ant_t * ant)
 {
 int cx, cy, dx, dy, x, y, i;
 float start_angle, curr_diff;
@@ -865,12 +896,6 @@ float start_angle, curr_diff;
 
 	ant->following_trail = false;
 
-	if (ant->type == ANT_TYPE_WORKER)
-	{
-
-	printf("START\n");
-	printf("start_angle: %f\n", start_angle);
-	}
 
 	for (dx = x - 3; dx <= x + 3; dx++)
 		for (dy = y - 3; dy <= y + 3; dy++)
@@ -884,13 +909,6 @@ float start_angle, curr_diff;
 
 				float diff = fabs(atan2(sin(angle - start_angle), cos(angle - start_angle)));
 
-				if (ant->type == ANT_TYPE_WORKER)
-				{
-				printf("found: %f %f\n", grid[dx][dy].x, grid[dx][dy].y);
-				printf("angle: %f diff: %f\n", angle, diff);
-
-				}
-
 				if (diff < curr_diff)
 				{
 					curr_diff = diff;
@@ -901,17 +919,13 @@ float start_angle, curr_diff;
 			}
 		}
 
-if (ant->type == ANT_TYPE_WORKER)
-{
-	printf("%d\n", ant->following_trail);
-	printf("END\n");
-}
+	return ant->following_trail;
 }
 
 void * scout_task(void * arg)
 {
 float vx, vy, da;
-bool found_food = false;
+int i;
 
 
 struct task_par * tp = (struct task_par *) arg;
@@ -923,6 +937,7 @@ struct ant_t * scout = &scout_list[tp->arg];
 	scout->speed = ANT_SPEED;
 	scout->angle = deg_to_rad(frand(0,360));
 	scout->pheromone_intensity = PHEROMONE_INTENSITY;
+	scout->state = ANT_RANDOM_MOVEMENT;
 
 	scout->following_trail = false;
 	scout->carrying_food = false;
@@ -931,78 +946,55 @@ struct ant_t * scout = &scout_list[tp->arg];
 
 	while(1)
 	{
-		bool at_home = check_nest(scout);
 
-        // Caso iniziale: sto girando liberamente senza cibo
-		if(!scout->carrying_food && !scout->following_trail)	
+		switch (scout->state)
 		{
-		    // L'obiettivo primario è trovare cibo e portarlo a casa
-		    
-		    // Se rilevo cibo vicino
-		    if (sense_food(scout))
-		    {
-		        // Se ci sono sopra
-    		    if (look_for_food(scout))
-                {
-                    // Dirigiti verso il nido rilasciando feromone
-                    head_towards(scout, nest.x, nest.y);
-                    found_food = true;
-                }
-		    }
-            // Se non ho cibo attorno a me, per il momento cerco a caso
-            else
-            {
-                da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-                scout->angle += da;
-                
-                // Poi dopo si vede se considerare una scia
-            }
-		}
+			case ANT_RANDOM_MOVEMENT:
+			{
+				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+                scout->angle += da;	
 
-		// Caso successivo: ho cibo in spalla, e sto tornando a casa
-		if (scout->carrying_food)
-		{
-		    // Se sono arrivato, poso la roba e torno al cibo
-		    if (check_nest(scout))
-		    {
-    			// deposita il cibo
-    			scout->carrying_food = false;
-    
-    			// girati
-    			scout->angle += M_PI;
-    
-    			// segui la scia verso il cibo
-    			follow_trail(scout);
-		    }
-    		// Se non sono arrivato, seguo la scia fino a casa, rilasciando feromone
-		    else
-		    {
-				head_towards(scout, nest.x, nest.y);
-				release_pheromone(scout);
-		    }
-		}
+                if(sense_food(scout) && look_for_food(scout))
+                	scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
 
-        // Penultimo caso: sto tornando verso il cibo seguendo la scia
-        if (!scout->carrying_food && scout->following_trail)
-        {
-
-        	sense_food(scout);
-            // Controllo se sono arrivato al cibo
-            if (look_for_food(scout))
-            {
-                // Se lo trovo, mi giro e torno a casa
-    			scout->angle += M_PI;
+               	break;
             }
 
-            // In ogni caso, continuo a seguire la scia
-    		follow_trail(scout);
-    		
-    		// Se la scia si è finita, e non ho trovato niente, vado a caso
-    		if (!scout->following_trail)
-    		{
-    		    // TODO: qui ci va la cosa per far capire alle altre che ho finito
-    		}
-        }
+            case ANT_TOWARDS_HOME_WITH_FOOD:
+            {
+            	release_pheromone(scout);
+            	head_towards(scout, nest.x, nest.y);
+            	if(check_nest(scout))
+            	{
+            		scout->state = ANT_TOWARDS_FOOD;
+            		scout->carrying_food = false;
+            	}
+            	break;
+            }
+
+            case ANT_TOWARDS_FOOD:
+			if (!sense_food(scout))
+			{
+				for (i = 0; i < MAX_FOOD_NUM; i++)
+					if (scout->food_x == food_list[i].x && scout->food_y == food_list[i].y && food_list[i].quantity == 0)
+					{
+						scout->state = ANT_RANDOM_MOVEMENT;
+						scout->food_x = -1;
+						scout->food_y = -1;
+							
+					}
+					else
+					{
+						follow_trail(scout);
+					}
+			}
+			else if (look_for_food(scout))
+			{
+				scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
+			}			
+		
+		}
+		
         
 		// aggiorna velocità e posizione
 		vx = scout->speed * cos(scout->angle);
@@ -1036,19 +1028,22 @@ float angle;
 
 	for (i = 0; i < nScouts; i++)
 	{
-		//converting degrees in allegro-degrees
-
-		angle = ((rad_to_deg(scout_list[i].angle + M_PI_2) * 256 / 360));
-
-		if(!scout_list[i].carrying_food)
+		if(scout_list[i].state != ANT_IDLE)
 		{
-			rotate_sprite(buffer, ant, scout_list[i].x - ANT_RADIUS, 
-				        scout_list[i].y - ANT_RADIUS, ftofix(angle));
-		}
-		else
-		{
-			rotate_sprite(buffer, ant_food, scout_list[i].x - ANT_RADIUS, 
-				        scout_list[i].y - ANT_RADIUS, ftofix(angle));
+			//converting degrees in allegro-degrees
+
+			angle = ((rad_to_deg(scout_list[i].angle + M_PI_2) * 256 / 360));
+
+			if(!scout_list[i].carrying_food)
+			{
+				rotate_sprite(buffer, ant, scout_list[i].x - ANT_RADIUS, 
+					        scout_list[i].y - ANT_RADIUS, ftofix(angle));
+			}
+			else
+			{
+				rotate_sprite(buffer, ant_food, scout_list[i].x - ANT_RADIUS, 
+					        scout_list[i].y - ANT_RADIUS, ftofix(angle));
+			}
 		}
 	
 	}
@@ -1077,21 +1072,3 @@ bool sense_food(struct ant_t * ant)
 
 	return false;
 }
-
-void follow_scent(struct ant_t * ant)
-{
-int x, y, i, j;
-int dx, dy;
-
-	x = ant->x / CELL_SIDE;
-	y = ant->y / CELL_SIDE;
-
-	for (dx =  x - i; dx < x + i; i++)
-		for(dy = y - i; dy < y + i; dy++)
-			if(grid[dx][dy].nest_scent > grid[x][y].nest_scent)
-				head_towards(ant, grid[x][y].x, grid[x][y].y);
-
-
-}
-
-	

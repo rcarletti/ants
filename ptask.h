@@ -20,6 +20,9 @@ void set_period(struct task_par*);
 void wait_for_period(struct task_par*);
 int deadline_miss(struct task_par*);
 
+void time_add_ms(struct timespec*, int);
+int time_cmp(struct timespec, struct timespec);
+
 pthread_t task_create(void *(*f)(void *), struct task_par * tp);
 
 
