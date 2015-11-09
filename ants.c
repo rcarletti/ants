@@ -12,8 +12,8 @@
 //GLOBAL CONSTANTS
 //---------------------------------------------------------------------------
 
-#define WINDOW_HEIGHT			768
-#define WINDOW_WIDTH			1024
+#define WINDOW_HEIGHT			600
+#define WINDOW_WIDTH			1300
 #define BACKGROUND_WIDTH		800
 #define BACKGROUND_HEIGHT		600
 
@@ -122,6 +122,7 @@ char get_scan_code(void);
 
 void draw_ants(void);
 void draw_scouts(void);
+void draw_interface(void);
 
 void * ant_task(void *);
 void * gfx_task(void *);
@@ -223,6 +224,9 @@ int main(int argc, char * argv[])
 	return 0;
 }
 
+//---------------------------------------------------------------------
+// PROCESS INPUTS FROM MOUSE AND KEYBOARD
+//---------------------------------------------------------------------
 
 void process_inputs(void)
 {
@@ -254,7 +258,6 @@ int i;
 			break;
 		case KEY_SPACE:
 		{	
-
 			for(i = 0; i < NUM_SCOUTS; i++)
 			{
 				scouts_tp[nScouts].arg = nScouts;
@@ -386,8 +389,8 @@ char get_scan_code(void)
 
 void * ant_task(void * arg)
 {
-float	da, vx, vy;
-int i;
+float 	vx, vy;
+
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
@@ -411,110 +414,129 @@ struct timespec awake_after, t;
 
 	// caso 1: fine della scia mentre cerchi cibo
 
+
 	while(1)
 	{
 		switch (ant->state)
 		{
-		case ANT_IDLE:
+			case ANT_IDLE:
 
-			if (follow_trail(ant))
-			{
-				clock_gettime(CLOCK_MONOTONIC, &awake_after);
-				time_add_ms(&awake_after, tp->arg * 1000);
+				if (follow_trail(ant))
+				{
+					clock_gettime(CLOCK_MONOTONIC, &awake_after);
+					time_add_ms(&awake_after, tp->arg * 1000);
 
-				ant->state = ANT_AWAKING;
-			}
+					ant->state = ANT_AWAKING;
+				}
 
-			break;
+				break;
 
-		case ANT_AWAKING:
+			case ANT_AWAKING:
 
-			clock_gettime(CLOCK_MONOTONIC, &t);
+				clock_gettime(CLOCK_MONOTONIC, &t);
 
-			if (time_cmp(awake_after, t) < 0)
-			{
-				ant->state = ANT_TOWARDS_FOOD;
-			}
-
-			break;
-
-		case ANT_TOWARDS_FOOD:
-			if (!sense_food(ant))
-			{
-				follow_trail(ant);
-			}
-			else if (look_for_food(ant))
-			{
-				follow_trail(ant);
-
-				if (ant->following_trail)
-					ant->state = ANT_TOWARDS_HOME_WITH_FOOD;
-				else
-					ant->state = ANT_RANDOM_MOVEMENT;
-			}
-
-			break;
-
-		case ANT_TOWARDS_HOME_NO_FOOD:
-
-			if (sense_nest(ant) && check_nest(ant))
-				ant->state = ANT_IDLE;
-
-			else 
-				follow_trail(ant);
-
-			break;
-
-		case ANT_TOWARDS_HOME_WITH_FOOD:
-			release_pheromone(ant);
-
-			if (!sense_nest(ant))
-			{
-				follow_trail(ant);
-			}
-			else if (check_nest(ant))
-			{
-				ant->carrying_food = false;
-
-				follow_trail(ant);
-
-				if (ant->following_trail)
+				if (time_cmp(awake_after, t) < 0)
+				{
 					ant->state = ANT_TOWARDS_FOOD;
-				else
-					ant->state = ANT_RANDOM_MOVEMENT;
-			}
+				}
 
-			break;
+				break;
 
-		case ANT_TOWARDS_UNKNOWN:
-			if (sense_nest(ant) && check_nest(ant))
-			{
-				ant->carrying_food = false;
-				ant->state = ANT_IDLE;
-			}
-			else if (sense_food(ant))
-				ant->state = ANT_TOWARDS_FOOD;
+			case ANT_TOWARDS_FOOD:
+				if (!sense_food(ant))
+				{
+					if(!follow_trail(ant))
+						ant->state = ANT_RANDOM_MOVEMENT;
 
-			break;
+				}
+				else if (look_for_food(ant))
+				{
+					follow_trail(ant);
 
-		case ANT_RANDOM_MOVEMENT:
-			ant->angle += deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+					if (ant->following_trail)
+						ant->state = ANT_TOWARDS_HOME_WITH_FOOD;
+					else
+						ant->state = ANT_RANDOM_MOVEMENT;
+				}
 
-			follow_trail(ant);
+				break;
 
-			if (ant->following_trail)
-				ant->state = ANT_TOWARDS_UNKNOWN;
-			else if (sense_nest(ant) && check_nest(ant))
-			{
-				ant->carrying_food = false;
-				ant->state = ANT_IDLE;
-			}
+			case ANT_TOWARDS_HOME_NO_FOOD:
 
-			break;
+				if (sense_nest(ant) && check_nest(ant))
+					ant->state = ANT_IDLE;
+
+				else 
+				{
+					follow_trail(ant);
+					if(!ant->following_trail)
+						ant->state = ANT_RANDOM_MOVEMENT;
+				}
+
+				break;
+
+			case ANT_TOWARDS_HOME_WITH_FOOD:
+				release_pheromone(ant);
+
+				if (!sense_nest(ant))
+				{
+					follow_trail(ant);
+				}
+				else if (check_nest(ant))
+				{
+					ant->carrying_food = false;
+
+					follow_trail(ant);
+
+					if (ant->following_trail)
+						ant->state = ANT_TOWARDS_FOOD;
+					else
+						ant->state = ANT_RANDOM_MOVEMENT;
+				}
+
+				break;
+
+			case ANT_TOWARDS_UNKNOWN:
+
+				follow_trail(ant);
+
+				if (sense_nest(ant) && check_nest(ant))
+				{
+					ant->carrying_food = false;
+					if(follow_trail(ant))
+						ant->state = ANT_TOWARDS_FOOD;
+					else
+						ant->state = ANT_IDLE;
+				}
+				else if (sense_food(ant))
+					ant->state = ANT_TOWARDS_FOOD;
+
+				break;
+
+			case ANT_RANDOM_MOVEMENT:
+
+				ant->angle += deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+
+				follow_trail(ant);
+
+				if (ant->following_trail)
+					ant->state = ANT_TOWARDS_UNKNOWN;
+				else if (sense_nest(ant) && check_nest(ant))
+				{
+					ant->carrying_food = false;
+					ant->state = ANT_IDLE;
+				}
+							
+
+				break;
+			default:
+				break;
 		}
 
 		if (ant->state != ANT_IDLE && ant->state != ANT_AWAKING)
 		{
+			bounce(ant);
+
 			// aggiorna velocità e posizione
 			vx = ant->speed * cos(ant->angle);
 			vy = ant->speed * sin(ant->angle);
@@ -522,7 +544,7 @@ struct timespec awake_after, t;
 			ant->x += vx * ANT_PERIOD;
 			ant->y += vy * ANT_PERIOD;
 
-			bounce(ant);
+			
 		}
 
 		if (deadline_miss(tp)) printf("deadline miss ant\n");
@@ -577,7 +599,7 @@ BITMAP * nest_image;
 
 		draw_scouts();
 
-
+		draw_interface();
 
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
@@ -615,8 +637,7 @@ int i,j;
 }
 
 //---------------------------------------------------------------------
-// controlla se la formica raggiunge la fine dello sfondo e la fa
-// tornare indietro
+// bouncing on edges
 //---------------------------------------------------------------------
 
 void bounce(struct ant_t * ant)
@@ -728,6 +749,10 @@ void head_towards(struct ant_t * ant, float x, float y)
 	ant->angle = angle_towards(ant, x, y);
 }
 
+//---------------------------------------------------------------------
+// permette alle formiche di vedere il nido e dirigersi verso di esso
+//---------------------------------------------------------------------
+
 bool sense_nest(struct ant_t * ant)
 {
 	if (distance(ant->x, ant->y, nest.x, nest.y) < 40)
@@ -739,6 +764,10 @@ bool sense_nest(struct ant_t * ant)
 	return false;
 }
 
+//---------------------------------------------------------------------
+// controlla se la formica si trova nel nido
+//---------------------------------------------------------------------
+
 bool check_nest(struct ant_t * ant)
 {
 	if (distance(ant->x, ant->y, nest.x, nest.y) < 5)
@@ -746,6 +775,10 @@ bool check_nest(struct ant_t * ant)
 
 	return false;
 }
+
+//---------------------------------------------------------------------
+// funzione per disegnare il cibo
+//---------------------------------------------------------------------
 
 void draw_food(void)
 {
@@ -773,6 +806,10 @@ int radius;
 			
 				
 }
+
+//---------------------------------------------------------------------
+// funzione per disegnare le formiche
+//---------------------------------------------------------------------
 
 void draw_ants(void)
 {
@@ -816,6 +853,10 @@ float angle;
 		}
 }
 
+//---------------------------------------------------------------------
+// inizializzazione griglia
+//---------------------------------------------------------------------
+
 void setup_grid()
 {
 int i, j;
@@ -828,6 +869,10 @@ int i, j;
 			grid[i][j].odor_intensity = 0;
 		}
 }
+
+//---------------------------------------------------------------------
+// funzione che rilascia i feromoni
+//---------------------------------------------------------------------
 
 void release_pheromone(struct ant_t * ant)
 {
@@ -849,13 +894,14 @@ struct timespec t;
 	
 }
 
+//---------------------------------------------------------------------
+// funzione che disegna i feromoni
+//---------------------------------------------------------------------
+
 void draw_pheromone(void)
 {
 int i, j;
-BITMAP * trail;
 int col = makecol(246, 240, 127);
-
-	trail = load_bitmap("scia.bmp", NULL);
 
 	for (i = 0; i < X_NUM_CELL; i++)
 		for (j = 0; j < Y_NUM_CELL; j++)
@@ -863,6 +909,10 @@ int col = makecol(246, 240, 127);
 				circlefill(buffer, grid[i][j].x, grid[i][j].y, 
 					       (grid[i][j].odor_intensity + 1) / 2, col);
 }
+
+//---------------------------------------------------------------------
+// funzione che fa evaporare i feromoni
+//---------------------------------------------------------------------
 
 void * pheromone_task(void * arg)
 {
@@ -883,9 +933,13 @@ struct task_par *tp = (struct task_par *) arg;
 	}
 }
 
+//---------------------------------------------------------------------
+// funzione che fa seguire la scia alle formiche
+//---------------------------------------------------------------------
+
 bool follow_trail(struct ant_t * ant)
 {
-int cx, cy, dx, dy, x, y, i;
+int dx, dy, x, y;
 float start_angle, curr_diff;
 
 	x = ant->x / CELL_SIDE;
@@ -898,29 +952,40 @@ float start_angle, curr_diff;
 
 
 	for (dx = x - 3; dx <= x + 3; dx++)
-		for (dy = y - 3; dy <= y + 3; dy++)
+	{
+		if(dx * CELL_SIDE > 0 && dx * CELL_SIDE < BACKGROUND_WIDTH)
 		{
-			if (dx == x && dy == y)
-				continue;
-
-			if (grid[dx][dy].odor_intensity > 0)
+			for (dy = y - 3; dy <= y + 3; dy++)
 			{
-				float angle = angle_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
-
-				float diff = fabs(atan2(sin(angle - start_angle), cos(angle - start_angle)));
-
-				if (diff < curr_diff)
+				if(dy * CELL_SIDE > 0 && dy * CELL_SIDE < BACKGROUND_HEIGHT)
 				{
-					curr_diff = diff;
-					ant->angle = angle;
-					ant->following_trail = true;
-				}
+					if (dx == x && dy == y)
+						continue;
 
-			}
-		}
+					if (grid[dx][dy].odor_intensity > 0)
+					{
+						float angle = angle_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
+
+						float diff = fabs(atan2(sin(angle - start_angle), cos(angle - start_angle)));
+
+						if (diff < curr_diff)
+						{
+							curr_diff = diff;
+							ant->angle = angle;
+							ant->following_trail = true;
+						}
+					}
+
+				}
+		}	}
+	}
 
 	return ant->following_trail;
 }
+
+//---------------------------------------------------------------------
+// corpo del thread che fa muovere le scout
+//---------------------------------------------------------------------
 
 void * scout_task(void * arg)
 {
@@ -991,7 +1056,9 @@ struct ant_t * scout = &scout_list[tp->arg];
 			else if (look_for_food(scout))
 			{
 				scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
-			}			
+			}
+
+			default: break;			
 		
 		}
 		
@@ -1009,6 +1076,10 @@ struct ant_t * scout = &scout_list[tp->arg];
 		wait_for_period(tp);
 	}
 }
+
+//---------------------------------------------------------------------
+// funzione che disegna le scout
+//---------------------------------------------------------------------
 
 void draw_scouts(void)
 {
@@ -1049,6 +1120,10 @@ float angle;
 	}
 }
 
+//---------------------------------------------------------------------
+// funzione che permette alle formiche di vedere il cibo
+//---------------------------------------------------------------------
+
 bool sense_food(struct ant_t * ant)
 {
 	int i;
@@ -1071,4 +1146,27 @@ bool sense_food(struct ant_t * ant)
 	}
 
 	return false;
+}
+
+
+void draw_interface()
+{
+int i;
+char buf[60];
+int blue = makecol(217, 241, 247);
+int red = makecol(247, 91, 137);
+
+	textout_ex(buffer, font, "FOOD:", 860, 25, red ,-1);
+
+
+
+	for (i = 0; i < MAX_FOOD_NUM; i++)
+	{
+		if(food_list[i].x != -1)
+		{
+			sprintf(buf, "pile n. %d, quantity: %d", i + 1, food_list[i].quantity);
+			textout_ex(buffer, font, buf, 850, 50 + (i*12), blue ,-1);
+		}
+	}
+
 }
