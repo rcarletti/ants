@@ -281,7 +281,7 @@ int i;
 			{
 				tp[nAnts].arg = nAnts;
 				tp[nAnts].period = 20;
-				tp[nAnts].deadline = 20;
+				tp[nAnts].deadline = 40;
 				tp[nAnts].priority = 10;
 
 				tid[nAnts] = task_create(ant_task, &tp[nAnts]);
@@ -456,6 +456,8 @@ struct timespec awake_after, t;
 				}
 				else if (look_for_food(ant))
 				{
+					ant->angle += M_PI;
+
 					follow_trail(ant);
 
 					if (ant->following_trail)
@@ -514,13 +516,18 @@ struct timespec awake_after, t;
 						ant->state = ANT_IDLE;
 				}
 				else if (sense_food(ant) && !ant->carrying_food)
+				{
 					ant->state = ANT_TOWARDS_FOOD;
+				}
+
+				else if (sense_food(ant) && ant->carrying_food && ant->following_trail)
+				{
+					ant->state = ANT_TOWARDS_HOME_WITH_FOOD;
+				}
 
 				break;
 
 			case ANT_RANDOM_MOVEMENT:
-
-				ant->angle += deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
 
 				if (follow_trail(ant))
 					ant->state = ANT_TOWARDS_UNKNOWN;
@@ -537,6 +544,8 @@ struct timespec awake_after, t;
 						look_for_food(ant);
 					}
 				}
+
+				ant->angle += deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
 							
 
 				break;
@@ -1065,7 +1074,13 @@ struct ant_t * scout = &scout_list[tp->arg];
             {
 				if (!sense_food(scout))
 				{
-					follow_trail(scout);		
+					follow_trail(scout);
+
+					if(!scout->following_trail)
+					{
+						scout->state = ANT_RANDOM_MOVEMENT;
+					}
+		
 				}
 
 				else if (look_for_food(scout))
@@ -1073,11 +1088,7 @@ struct ant_t * scout = &scout_list[tp->arg];
 					scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
 				}
 
-				if(!follow_trail(scout))
-				{
-					scout->state = ANT_RANDOM_MOVEMENT;
-				}
-
+				
 				break;
 			}
 
@@ -1111,16 +1122,22 @@ struct ant_t * scout = &scout_list[tp->arg];
 void draw_scouts(void)
 {
 int i;
-BITMAP * ant;
-BITMAP * ant_food;
+BITMAP * scout;
+BITMAP * scout_food;
 float angle;
 
-	ant = load_bitmap("scout.bmp", NULL);
-	ant_food = load_bitmap("scout.bmp", NULL);
+	scout = load_bitmap("scout.bmp", NULL);
+	scout_food = load_bitmap("scout_food.bmp", NULL);
 
-	if (ant == NULL)
+	if (scout == NULL)
 	{
-		printf("errore ant \n");
+		printf("errore scout \n");
+		exit(1);
+	}
+
+	if (scout_food == NULL)
+	{
+		printf("errore scout_food \n");
 		exit(1);
 	}
 
@@ -1134,12 +1151,12 @@ float angle;
 
 			if(!scout_list[i].carrying_food)
 			{
-				rotate_sprite(buffer, ant, scout_list[i].x - ANT_RADIUS, 
+				rotate_sprite(buffer, scout, scout_list[i].x - ANT_RADIUS, 
 					        scout_list[i].y - ANT_RADIUS, ftofix(angle));
 			}
 			else
 			{
-				rotate_sprite(buffer, ant_food, scout_list[i].x - ANT_RADIUS, 
+				rotate_sprite(buffer, scout_food, scout_list[i].x - ANT_RADIUS, 
 					        scout_list[i].y - ANT_RADIUS, ftofix(angle));
 			}
 		}
