@@ -276,6 +276,39 @@ int j;
 }
 
 //---------------------------------------------------------------------
+// fa il setup della griglia
+//---------------------------------------------------------------------
+
+
+void setup_grid()
+{
+int i, j;
+
+	for (i = 0; i < X_NUM_CELL; i++)
+		for (j = 0; j < Y_NUM_CELL; j++)
+		{
+			grid[i][j].x = i * CELL_SIDE + CELL_SIDE / 2;
+			grid[i][j].y = j * CELL_SIDE + CELL_SIDE / 2;
+			grid[i][j].odor_intensity = 0;
+		}
+}
+
+
+//---------------------------------------------------------------------
+// puts ants nest on the environment
+//---------------------------------------------------------------------
+
+void put_nest(void)
+{
+int i,j;
+	nest.x = BACKGROUND_WIDTH / 2;
+	nest.y = BACKGROUND_HEIGHT / 2;
+	for (i = 0; i < X_NUM_CELL; i++)
+		for(j = 0; j <  Y_NUM_CELL; j++)
+			grid[i][j].nest_scent = MAX_NEST_SCENT - distance(nest.x, nest.y, grid[i][j].x, grid[i][j].y);
+}
+
+//---------------------------------------------------------------------
 // processa gli input da mouse e tastiera
 //---------------------------------------------------------------------
 
@@ -587,143 +620,101 @@ struct timespec awake_after, t;
 	}
 } 
 
-//----------------------------------------------------------------------
-// UPDATE GRAPHIC
-//----------------------------------------------------------------------
+//---------------------------------------------------------------------
+// corpo del thread che fa muovere le scout
+//---------------------------------------------------------------------
 
-
-void * gfx_task(void * arg)
+void * scout_task(void * arg)
 {
-struct task_par *tp = (struct task_par *) arg;
+float vx, vy, da;
+int i;
 
-BITMAP * ground;
 
-BITMAP * nest_image;
+struct task_par * tp = (struct task_par *) arg;
+struct ant_t * scout = &scout_list[tp->arg];
 
-	ground = load_bitmap("ground2.bmp", NULL);
-	if(ground == NULL)
-		{
-			printf("errore ground \n");
-			exit(1);
-		}
+	scout->type = ANT_TYPE_SCOUT;
+	scout->x = nest.x; 
+	scout->y = nest.y; 
+	scout->speed = ANT_SPEED;
+	scout->angle = deg_to_rad(frand(0,360));
+	scout->pheromone_intensity = PHEROMONE_INTENSITY;
+	scout->state = ANT_RANDOM_MOVEMENT;
 
-	nest_image = load_bitmap("nest3.bmp", NULL);
-	if(nest_image == NULL)
-	{
-		printf("errore nest \n");
-		exit(1);
-	}
+	scout->following_trail = false;
+	scout->carrying_food = false;
 
 	set_period(tp);
 
 	while(1)
 	{
-		scare_mouse();
 
-		clear_to_color(buffer, 0);
+		switch (scout->state)
+		{
+			case ANT_RANDOM_MOVEMENT:
+			{
+				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
+                scout->angle += da;	
 
-		draw_sprite(buffer, ground, 0, 0);
+                if(sense_food(scout) && look_for_food(scout))
+                	scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
 
-		draw_pheromone();
+               	break;
+            }
 
-		draw_food();
+            case ANT_TOWARDS_HOME_WITH_FOOD:
+            {
+            	release_pheromone(scout);
+            	head_towards(scout, nest.x, nest.y);
+            	if(check_nest(scout))
+            	{
+            		scout->state = ANT_TOWARDS_FOOD;
+            		scout->carrying_food = false;
+            	}
+            	break;
+            }
 
-		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);
+            case ANT_TOWARDS_FOOD:
+            {
+				if (!sense_food(scout))
+				{
+					follow_trail(scout);
 
-		draw_ants();
+					if(!scout->following_trail)
+					{
+						scout->state = ANT_RANDOM_MOVEMENT;
+					}
+				}
 
-		draw_scouts();
+				else if (look_for_food(scout))
+				{
+					scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
+				}
 
-		draw_interface();
+				break;
+			}
 
-		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
+			default: break;			
+		
+		}
+		
+		// aggiorna velocità e posizione
+		vx = scout->speed * cos(scout->angle);
+		vy = scout->speed * sin(scout->angle);
 
-		unscare_mouse();
+		scout->x += vx * ANT_PERIOD;
+		scout->y += vy * ANT_PERIOD;
+
+		bounce(scout);
 
 		if (deadline_miss(tp)) 
 		{
-			printf("deadline miss gfx\n");
+			printf("deadline miss scout\n");
 			deadline_miss_num++;
 		}
 		wait_for_period(tp);
 	}
 }
-
-//--------------------------------------------------------------------
-// returns a random float in [xmi, xma)
-//--------------------------------------------------------------------
-
-float frand(float xmi, float xma)
-{
-float 	r;	
-	r = (float)rand()/(float)RAND_MAX;
-	return xmi + (xma - xmi) * r;
-}
-
-
-//---------------------------------------------------------------------
-// puts ants nest on the environment
-//---------------------------------------------------------------------
-
-void put_nest(void)
-{
-int i,j;
-	nest.x = BACKGROUND_WIDTH / 2;
-	nest.y = BACKGROUND_HEIGHT / 2;
-	for (i = 0; i < X_NUM_CELL; i++)
-		for(j = 0; j <  Y_NUM_CELL; j++)
-			grid[i][j].nest_scent = MAX_NEST_SCENT - distance(nest.x, nest.y, grid[i][j].x, grid[i][j].y);
-}
-
-//---------------------------------------------------------------------
-// bouncing on edges
-//---------------------------------------------------------------------
-
-void bounce(struct ant_t * ant)
-{
-	if (ant->x < ANT_RADIUS)
-	{
-		ant->angle +=deg_to_rad(90);
-	}
-
-	if (ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))
-	{
-		ant->angle -= deg_to_rad(90);
-	}
-
-	if (ant->y < ANT_RADIUS)
-	{
-		ant->angle += deg_to_rad(90);
-	}
-
-	if (ant->y > (BACKGROUND_HEIGHT - ANT_RADIUS))
-	{
-		ant->angle -= deg_to_rad(90);
-	}
-
-
-}
-
-//---------------------------------------------------------------------
-// converte i gradi in radianti
-//---------------------------------------------------------------------
-
-float deg_to_rad(float angle)
-{
-	angle = angle * M_PI/180;
-	return angle;
-}
-
-//---------------------------------------------------------------------
-// converte i radianti in gradi
-//---------------------------------------------------------------------
-
-float rad_to_deg(float angle)
-{
-	angle = angle * 180 / M_PI;
-	return angle;
-}
-
 
 //---------------------------------------------------------------------
 // controlla se la formica ha trovato cibo
@@ -753,35 +744,28 @@ int i;
 	return false;
 }
 
-
-
 //---------------------------------------------------------------------
-// calcola la distanza fra due punti
+// funzione che permette alle formiche di vedere il cibo
 //---------------------------------------------------------------------
 
-
-float distance(float x_s,float y_s, float x_d, float y_d)
+bool sense_food(struct ant_t * ant)
 {
-int distance_x, distance_y, distance;
+	int i;
 
-	distance_x = ((x_s - x_d) * (x_s - x_d));
-	distance_y = ((y_s - y_d) * (y_s - y_d));
-	distance = sqrt(distance_y + distance_x);
-	return distance;
-}
+	for (i = 0; i < MAX_FOOD_NUM; i++)
+	{
+	float dist = distance(ant->x,ant->y, food_list[i].x, food_list[i].y);
 
-float angle_towards(struct ant_t * ant, float x, float y)
-{
-float dx, dy;
+		if (food_list[i].quantity > 0 && 
+			dist < ((food_list[i].quantity * FOOD_SCALE / 2) + 20)
+		   )
+		{
+			head_towards(ant, food_list[i].x , food_list[i].y);
+			return true;
+		}
+	}
 
-	dx = (x - ant->x);
-	dy = (y - ant->y);
-	return atan2(dy,dx);
-}
-
-void head_towards(struct ant_t * ant, float x, float y)
-{
-	ant->angle = angle_towards(ant, x, y);
+	return false;
 }
 
 //---------------------------------------------------------------------
@@ -812,100 +796,6 @@ bool check_nest(struct ant_t * ant)
 }
 
 //---------------------------------------------------------------------
-// funzione per disegnare il cibo
-//---------------------------------------------------------------------
-
-void draw_food(void)
-{
-int i;
-int radius;
-
-	BITMAP * food;
-
-	food = load_bitmap("sugar.bmp", NULL);
-	if (food == NULL)
-	{
-		printf("errore food \n");
-		exit(1);
-	}
-
-	for (i = 0; i < MAX_FOOD_NUM; i++)
-		if (food_list[i].quantity > 0)
-		{
-			radius = (food_list[i].quantity * FOOD_SCALE) / 2;
-
-			stretch_sprite(buffer, food, 
-				food_list[i].x - radius, food_list[i].y - radius,
-				radius * 2, radius * 2);	
-		}
-			
-				
-}
-
-//---------------------------------------------------------------------
-// funzione per disegnare le formiche
-//---------------------------------------------------------------------
-
-void draw_ants(void)
-{
-int i;
-BITMAP * ant;
-BITMAP * ant_food;
-float angle;
-
-	ant = load_bitmap("ant.bmp", NULL);
-
-	if (ant == NULL)
-	{
-		printf("errore ant\n");
-		exit(1);
-	}
-
-	ant_food = load_bitmap("ant_food.bmp", NULL);
-
-	if (ant_food == NULL)
-	{
-		printf("errore ant_food \n");
-		exit(1);
-	}
-
-	for (i = 0; i < MAX_NUM_ANTS; i++)
-		{
-			if (ant_list[i].state != ANT_IDLE && ant_list[i].state!= ANT_AWAKING)
-			{
-				//converting degrees in allegro-degrees
-				angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
-
-				if  (!ant_list[i].carrying_food)
-					rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
-					              ant_list[i].y - ANT_RADIUS, ftofix(angle));
-				else
-					rotate_sprite(buffer, ant_food, ant_list[i].x - ANT_RADIUS, 
-					              ant_list[i].y - ANT_RADIUS, ftofix(angle));
-			}
-
-
-		}
-}
-
-//---------------------------------------------------------------------
-// inizializzazione griglia
-//---------------------------------------------------------------------
-
-void setup_grid()
-{
-int i, j;
-
-	for (i = 0; i < X_NUM_CELL; i++)
-		for (j = 0; j < Y_NUM_CELL; j++)
-		{
-			grid[i][j].x = i * CELL_SIDE + CELL_SIDE / 2;
-			grid[i][j].y = j * CELL_SIDE + CELL_SIDE / 2;
-			grid[i][j].odor_intensity = 0;
-		}
-}
-
-//---------------------------------------------------------------------
 // funzione che rilascia i feromoni
 //---------------------------------------------------------------------
 
@@ -927,22 +817,6 @@ struct timespec t;
 		ant->last_release = t;
 	}
 	
-}
-
-//---------------------------------------------------------------------
-// funzione che disegna i feromoni
-//---------------------------------------------------------------------
-
-void draw_pheromone(void)
-{
-int i, j;
-int col = makecol(246, 240, 127);
-
-	for (i = 0; i < X_NUM_CELL; i++)
-		for (j = 0; j < Y_NUM_CELL; j++)
-			if (grid[i][j].odor_intensity > 0)
-				circlefill(buffer, grid[i][j].x, grid[i][j].y, 
-					       (grid[i][j].odor_intensity + 1) / 2, col);
 }
 
 //---------------------------------------------------------------------
@@ -1023,104 +897,254 @@ float start_angle, curr_diff;
 	return ant->following_trail;
 }
 
-//---------------------------------------------------------------------
-// corpo del thread che fa muovere le scout
-//---------------------------------------------------------------------
+//----------------------------------------------------------------------
+// UPDATE GRAPHIC
+//----------------------------------------------------------------------
 
-void * scout_task(void * arg)
+
+void * gfx_task(void * arg)
 {
-float vx, vy, da;
-int i;
+struct task_par *tp = (struct task_par *) arg;
 
+BITMAP * ground;
 
-struct task_par * tp = (struct task_par *) arg;
-struct ant_t * scout = &scout_list[tp->arg];
+BITMAP * nest_image;
 
-	scout->type = ANT_TYPE_SCOUT;
-	scout->x = nest.x; 
-	scout->y = nest.y; 
-	scout->speed = ANT_SPEED;
-	scout->angle = deg_to_rad(frand(0,360));
-	scout->pheromone_intensity = PHEROMONE_INTENSITY;
-	scout->state = ANT_RANDOM_MOVEMENT;
+	ground = load_bitmap("ground2.bmp", NULL);
+	if(ground == NULL)
+		{
+			printf("errore ground \n");
+			exit(1);
+		}
 
-	scout->following_trail = false;
-	scout->carrying_food = false;
+	nest_image = load_bitmap("nest3.bmp", NULL);
+	if(nest_image == NULL)
+	{
+		printf("errore nest \n");
+		exit(1);
+	}
 
 	set_period(tp);
 
 	while(1)
 	{
+		scare_mouse();
 
-		switch (scout->state)
-		{
-			case ANT_RANDOM_MOVEMENT:
-			{
-				da = deg_to_rad(frand(-DELTA_ANGLE, DELTA_ANGLE));
-                scout->angle += da;	
+		clear_to_color(buffer, 0);
 
-                if(sense_food(scout) && look_for_food(scout))
-                	scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
+		draw_sprite(buffer, ground, 0, 0);
 
-               	break;
-            }
+		draw_pheromone();
 
-            case ANT_TOWARDS_HOME_WITH_FOOD:
-            {
-            	release_pheromone(scout);
-            	head_towards(scout, nest.x, nest.y);
-            	if(check_nest(scout))
-            	{
-            		scout->state = ANT_TOWARDS_FOOD;
-            		scout->carrying_food = false;
-            	}
-            	break;
-            }
+		draw_food();
 
-            case ANT_TOWARDS_FOOD:
-            {
-				if (!sense_food(scout))
-				{
-					follow_trail(scout);
+		draw_sprite(buffer, nest_image, nest.x - NEST_RADIUS, nest.y - NEST_RADIUS);
 
-					if(!scout->following_trail)
-					{
-						scout->state = ANT_RANDOM_MOVEMENT;
-					}
-		
-				}
+		draw_ants();
 
-				else if (look_for_food(scout))
-				{
-					scout->state = ANT_TOWARDS_HOME_WITH_FOOD;
-				}
+		draw_scouts();
 
-				
-				break;
-			}
+		draw_interface();
 
-			default: break;			
-		
-		}
-		
-        
-		// aggiorna velocità e posizione
-		vx = scout->speed * cos(scout->angle);
-		vy = scout->speed * sin(scout->angle);
+		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
-		scout->x += vx * ANT_PERIOD;
-		scout->y += vy * ANT_PERIOD;
-
-		bounce(scout);
+		unscare_mouse();
 
 		if (deadline_miss(tp)) 
 		{
-			printf("deadline miss scout\n");
+			printf("deadline miss gfx\n");
 			deadline_miss_num++;
 		}
 		wait_for_period(tp);
 	}
 }
+
+//--------------------------------------------------------------------
+// returns a random float in [xmi, xma)
+//--------------------------------------------------------------------
+
+float frand(float xmi, float xma)
+{
+float 	r;	
+	r = (float)rand()/(float)RAND_MAX;
+	return xmi + (xma - xmi) * r;
+}
+
+//---------------------------------------------------------------------
+// bouncing on edges
+//---------------------------------------------------------------------
+
+void bounce(struct ant_t * ant)
+{
+	if (ant->x < ANT_RADIUS)
+	{
+		ant->angle +=deg_to_rad(90);
+	}
+
+	if (ant->x > (BACKGROUND_WIDTH - ANT_RADIUS))
+	{
+		ant->angle -= deg_to_rad(90);
+	}
+
+	if (ant->y < ANT_RADIUS)
+	{
+		ant->angle += deg_to_rad(90);
+	}
+
+	if (ant->y > (BACKGROUND_HEIGHT - ANT_RADIUS))
+	{
+		ant->angle -= deg_to_rad(90);
+	}
+
+
+}
+
+//---------------------------------------------------------------------
+// converte i gradi in radianti
+//---------------------------------------------------------------------
+
+float deg_to_rad(float angle)
+{
+	angle = angle * M_PI/180;
+	return angle;
+}
+
+//---------------------------------------------------------------------
+// converte i radianti in gradi
+//---------------------------------------------------------------------
+
+float rad_to_deg(float angle)
+{
+	angle = angle * 180 / M_PI;
+	return angle;
+}
+
+
+//---------------------------------------------------------------------
+// calcola la distanza fra due punti
+//---------------------------------------------------------------------
+
+
+float distance(float x_s,float y_s, float x_d, float y_d)
+{
+int distance_x, distance_y, distance;
+
+	distance_x = ((x_s - x_d) * (x_s - x_d));
+	distance_y = ((y_s - y_d) * (y_s - y_d));
+	distance = sqrt(distance_y + distance_x);
+	return distance;
+}
+
+float angle_towards(struct ant_t * ant, float x, float y)
+{
+float dx, dy;
+
+	dx = (x - ant->x);
+	dy = (y - ant->y);
+	return atan2(dy,dx);
+}
+
+void head_towards(struct ant_t * ant, float x, float y)
+{
+	ant->angle = angle_towards(ant, x, y);
+}
+
+
+//---------------------------------------------------------------------
+// funzione per disegnare il cibo
+//---------------------------------------------------------------------
+
+void draw_food(void)
+{
+int i;
+int radius;
+
+	BITMAP * food;
+
+	food = load_bitmap("sugar.bmp", NULL);
+	if (food == NULL)
+	{
+		printf("errore food \n");
+		exit(1);
+	}
+
+	for (i = 0; i < MAX_FOOD_NUM; i++)
+		if (food_list[i].quantity > 0)
+		{
+			radius = (food_list[i].quantity * FOOD_SCALE) / 2;
+
+			stretch_sprite(buffer, food, 
+				food_list[i].x - radius, food_list[i].y - radius,
+				radius * 2, radius * 2);	
+		}
+			
+				
+}
+
+//---------------------------------------------------------------------
+// funzione per disegnare le formiche
+//---------------------------------------------------------------------
+
+void draw_ants(void)
+{
+int i;
+BITMAP * ant;
+BITMAP * ant_food;
+float angle;
+
+	ant = load_bitmap("ant.bmp", NULL);
+
+	if (ant == NULL)
+	{
+		printf("errore ant\n");
+		exit(1);
+	}
+
+	ant_food = load_bitmap("ant_food.bmp", NULL);
+
+	if (ant_food == NULL)
+	{
+		printf("errore ant_food \n");
+		exit(1);
+	}
+
+	for (i = 0; i < MAX_NUM_ANTS; i++)
+		{
+			if (ant_list[i].state != ANT_IDLE && ant_list[i].state!= ANT_AWAKING)
+			{
+				//converting degrees in allegro-degrees
+				angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
+
+				if  (!ant_list[i].carrying_food)
+					rotate_sprite(buffer, ant, ant_list[i].x - ANT_RADIUS, 
+					              ant_list[i].y - ANT_RADIUS, ftofix(angle));
+				else
+					rotate_sprite(buffer, ant_food, ant_list[i].x - ANT_RADIUS, 
+					              ant_list[i].y - ANT_RADIUS, ftofix(angle));
+			}
+
+
+		}
+}
+
+
+
+//---------------------------------------------------------------------
+// funzione che disegna i feromoni
+//---------------------------------------------------------------------
+
+void draw_pheromone(void)
+{
+int i, j;
+int col = makecol(246, 240, 127);
+
+	for (i = 0; i < X_NUM_CELL; i++)
+		for (j = 0; j < Y_NUM_CELL; j++)
+			if (grid[i][j].odor_intensity > 0)
+				circlefill(buffer, grid[i][j].x, grid[i][j].y, 
+					       (grid[i][j].odor_intensity + 1) / 2, col);
+}
+
 
 //---------------------------------------------------------------------
 // funzione che disegna le scout
@@ -1171,29 +1195,6 @@ float angle;
 	}
 }
 
-//---------------------------------------------------------------------
-// funzione che permette alle formiche di vedere il cibo
-//---------------------------------------------------------------------
-
-bool sense_food(struct ant_t * ant)
-{
-	int i;
-
-	for (i = 0; i < MAX_FOOD_NUM; i++)
-	{
-	float dist = distance(ant->x,ant->y, food_list[i].x, food_list[i].y);
-
-		if (food_list[i].quantity > 0 && 
-			dist < ((food_list[i].quantity * FOOD_SCALE / 2) + 20)
-		   )
-		{
-			head_towards(ant, food_list[i].x , food_list[i].y);
-			return true;
-		}
-	}
-
-	return false;
-}
 
 
 void draw_interface()
