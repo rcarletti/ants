@@ -24,9 +24,8 @@
 #define MAX_FOOD_QUANTITY		10	//numero massimo di cibo per pila
 #define FOOD_SCALE              8   // radius = quantity * scale	
 
-#define MAX_NUM_ANTS			10		//numero di formiche normali
+#define MAX_NUM_ANTS			10		//numero di formiche worker
 #define DELTA_ANGLE				5		//max angle deviation
-#define DELTA_SPEED				0.1		//max_speed deviation
 #define ANT_PERIOD				0.02
 #define ANT_SPEED				20 
 #define ANT_RADIUS				8
@@ -46,7 +45,6 @@
 #define ANT_TYPE_SCOUT          0
 #define ANT_TYPE_WORKER         1
 
-#define MAX_NEST_SCENT			50
 
 
 
@@ -70,8 +68,8 @@ enum state_t
 
 struct food_t
 {
-	float 	x;						//center coord
-	float 	y;						//center coord
+	float 	x;						//coordinate del centro
+	float 	y;						//coordinate del centro
 	int 	quantity;
 
 };
@@ -87,8 +85,7 @@ struct ant_t
 
 	enum state_t state;
 
-	bool 	found_food, carrying_food, following_trail;
-	float   food_x, food_y;
+	bool 	carrying_food, following_trail;
 	bool 	inside_nest;
 
 	struct timespec last_release;
@@ -106,7 +103,6 @@ struct cell_t
 	float x;			//center of the cell
 	float y;
 	float odor_intensity;
-	float nest_scent;
 };
 
 //---------------------------------------------------------------------------
@@ -160,8 +156,8 @@ bool sense_food(struct ant_t *);
 //GLOBAL VARIABLES
 //---------------------------------------------------------------------------
 
-BITMAP *buffer; 			//buffer for double buffering
-int		mouse_prev = 0;		//previous mouse value
+BITMAP *buffer; 			//buffer per il double buffering
+int		mouse_prev = 0;		//valore precedente del mouse
 
 int 				food_x = 0;					//food center coord
 int 				food_y = 0;
@@ -184,7 +180,7 @@ pthread_attr_t		scouts_attr[MAX_NUM_SCOUTS];
 struct ant_t 		scout_list[MAX_NUM_SCOUTS] = {{0}};
 int 				nScouts = 0;
 
-bool				running = true;
+bool				running = true;			//simulazione attiva
 
 pthread_t           gfx_tid;
 struct task_par     gfx_tp;
@@ -194,15 +190,10 @@ struct task_par     ph_tp;
 
 struct cell_t 		grid[X_NUM_CELL][Y_NUM_CELL];	//griglia dello sfondo
 
-pthread_mutex_t		scout_mutex;
-pthread_cond_t		scout_condition;
-
-
-int 				counter_food_found = 0;			//cibi trovati non ancora finiti
 
 struct timespec 	global_t;
 
-int 				deadline_miss_num = 0; 
+int 				deadline_miss_num = 0;			//conta i deadline miss 
 
 
 //---------------------------------------------------------------------------
@@ -226,8 +217,66 @@ int main(int argc, char * argv[])
 	return 0;
 }
 
+//------------------------------------------------------------------------
+// inizializza lo scenario
+//------------------------------------------------------------------------
+
+void setup(void)
+{
+int j;
+	//allegro setup
+
+	allegro_init();
+	install_keyboard();
+	install_mouse();
+
+	set_color_depth(24);
+
+	set_color_conversion(COLORCONV_8_TO_24);
+
+	set_gfx_mode(GFX_AUTODETECT_WINDOWED, WINDOW_WIDTH, WINDOW_HEIGHT,0,0);
+
+	show_mouse(screen);
+
+	//double buffering
+
+	buffer = create_bitmap(WINDOW_WIDTH, WINDOW_HEIGHT);
+	clear_bitmap(buffer);
+	clear_to_color(buffer, 0);
+
+	setup_grid();
+
+	srand(time(NULL));
+
+	// creazione thread grafico
+	gfx_tp.arg = 0;
+	gfx_tp.period = 80;
+	gfx_tp.deadline = 80;
+	gfx_tp.priority = 10;
+
+	gfx_tid = task_create(gfx_task, &gfx_tp);
+
+	//creazione thread che decrementa i feromoni
+	ph_tp.arg = 0;
+	ph_tp.period = PHEROMONE_TASK_PERIOD;
+	ph_tp.deadline = 80;
+	ph_tp.priority = 10;
+
+	ph_tid = task_create(pheromone_task, &ph_tp);
+
+	put_nest();
+
+	for (j = 0; j < MAX_FOOD_NUM; j++)
+	{
+		food_list[j].x = -1;
+		food_list[j].y = -1;
+	}
+
+	
+}
+
 //---------------------------------------------------------------------
-// PROCESS INPUTS FROM MOUSE AND KEYBOARD
+// processa gli input da mouse e tastiera
 //---------------------------------------------------------------------
 
 void process_inputs(void)
@@ -236,7 +285,7 @@ char	  scan;
 const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 int i;
 
-	// mouse
+	// salva le coordinate del click del mouse
 
 	food_x = mouse_x;
 	food_y = mouse_y;
@@ -250,7 +299,7 @@ int i;
 
 	mouse_prev = mouse_b;
 
-	// keyboard
+	// input da tastiera
 	scan = get_scan_code();
 
 	switch(scan)
@@ -297,7 +346,7 @@ int i;
 }
 
 //-----------------------------------------------------------------------
-//PUT FOOD ON MOUSE CLICK
+//crea il cibo nel punto in cui l'utente clicka col mouse
 //-----------------------------------------------------------------------
 
 
@@ -319,66 +368,9 @@ int 	i;
 			}
 		}
 	}
-
 }
 
-//------------------------------------------------------------------------
-// SETUP THE ENVIRONMENT
-//------------------------------------------------------------------------
 
-void setup(void)
-{
-int j;
-	//allegro setup
-
-	allegro_init();
-	install_keyboard();
-	install_mouse();
-
-	set_color_depth(24);
-
-	set_color_conversion(COLORCONV_8_TO_24);
-
-	set_gfx_mode(GFX_AUTODETECT_WINDOWED, WINDOW_WIDTH, WINDOW_HEIGHT,0,0);
-
-	show_mouse(screen);
-
-	//double buffering
-
-	buffer = create_bitmap(WINDOW_WIDTH, WINDOW_HEIGHT);
-	clear_bitmap(buffer);
-	clear_to_color(buffer, 0);
-
-	setup_grid();
-
-	srand(time(NULL));
-
-	// create graphics task
-	gfx_tp.arg = 0;
-	gfx_tp.period = 80;
-	gfx_tp.deadline = 80;
-	gfx_tp.priority = 10;
-
-	gfx_tid = task_create(gfx_task, &gfx_tp);
-
-	ph_tp.arg = 0;
-	ph_tp.period = PHEROMONE_TASK_PERIOD;
-	ph_tp.deadline = 80;
-	ph_tp.priority = 10;
-
-	ph_tid = task_create(pheromone_task, &ph_tp);
-
-	put_nest();
-
-
-	for (j = 0; j < MAX_FOOD_NUM; j++)
-	{
-		food_list[j].x = -1;
-		food_list[j].y = -1;
-	}
-
-	
-}
 
 char get_scan_code(void)
 {
@@ -389,19 +381,18 @@ char get_scan_code(void)
 }
 
 //---------------------------------------------------------------------
-// UPDATE ANTS
+// update ants
 //---------------------------------------------------------------------
 
 
 void * ant_task(void * arg)
 {
-float 	vx, vy;
+float 	vx, vy;					// componenti del vettore velocità
 
 struct task_par * tp = (struct task_par *) arg;
 struct ant_t * ant = &ant_list[tp->arg];
 
 struct timespec awake_after, t;
-
 
 	ant->type = ANT_TYPE_WORKER;
 	ant->state = ANT_IDLE;
@@ -418,14 +409,12 @@ struct timespec awake_after, t;
 
 	set_period(tp);
 
-
-
 	while(1)
 	{
 		switch (ant->state)
 		{
 			case ANT_IDLE:
-
+				//la formica è nel nido, aspetta di sentire una traccia
 				if (follow_trail(ant))
 				{
 					clock_gettime(CLOCK_MONOTONIC, &awake_after);
@@ -440,6 +429,8 @@ struct timespec awake_after, t;
 
 				clock_gettime(CLOCK_MONOTONIC, &t);
 
+				//se è passato un tempo sufficiente esce dal nido
+
 				if (time_cmp(awake_after, t) < 0)
 				{
 					ant->state = ANT_TOWARDS_FOOD;
@@ -448,17 +439,24 @@ struct timespec awake_after, t;
 				break;
 
 			case ANT_TOWARDS_FOOD:
+			{
+				//la formica sta andando verso il cibo
+				//se è vicino al cibo ma non ci sono feromoni si muove random
 				if (!sense_food(ant))
 				{
 					if(!follow_trail(ant))
 						ant->state = ANT_RANDOM_MOVEMENT;
-
 				}
+
+				//altrimenti se ha trovato il cibo si gira
+
 				else if (look_for_food(ant))
 				{
 					ant->angle += M_PI;
 
 					follow_trail(ant);
+
+					//se ritrova una traccia torna al nido, altrimenti si muove random
 
 					if (ant->following_trail)
 						ant->state = ANT_TOWARDS_HOME_WITH_FOOD;
@@ -467,30 +465,41 @@ struct timespec awake_after, t;
 				}
 
 				break;
+			}
 
 			case ANT_TOWARDS_HOME_NO_FOOD:
-
+			{
+				//se la formica è al nido senza cibo, torna in idle
 				if (sense_nest(ant) && check_nest(ant))
 					ant->state = ANT_IDLE;
 
 				else 
 				{
+					//se non è ancora al nido segue i feromoni
 					follow_trail(ant);
+					//se non ci sono feromoni si muove random
 					if(!ant->following_trail)
+					{
 						ant->state = ANT_RANDOM_MOVEMENT;
+					}
 				}
 
 				break;
+			}
 
 			case ANT_TOWARDS_HOME_WITH_FOOD:
+			{
+				//rinforza la scia di feromoni
 				release_pheromone(ant);
 
+				//fino a che non arriva al nido segue la traccia
 				if (!sense_nest(ant))
 				{
 					follow_trail(ant);
 				}
 				else if (check_nest(ant))
 				{
+					//quando arriva al nido posa il cibo e, se presente, continua a seguire la traccia
 					ant->carrying_food = false;
 
 					follow_trail(ant);
@@ -502,9 +511,10 @@ struct timespec awake_after, t;
 				}
 
 				break;
+			}
 
 			case ANT_TOWARDS_UNKNOWN:
-
+			{
 				follow_trail(ant);
 
 				if (sense_nest(ant) && check_nest(ant))
@@ -526,6 +536,7 @@ struct timespec awake_after, t;
 				}
 
 				break;
+			}	
 
 			case ANT_RANDOM_MOVEMENT:
 
@@ -733,10 +744,6 @@ int i;
 		{
 			ant->following_trail = true;
 			ant->carrying_food = true;
-
-			ant->food_x = food_list[i].x;
-			ant->food_y = food_list[i].y;
-
 			food_list[i].quantity--;
 
 			return true;
@@ -1180,11 +1187,7 @@ bool sense_food(struct ant_t * ant)
 			dist < ((food_list[i].quantity * FOOD_SCALE / 2) + 20)
 		   )
 		{
-
-			ant->food_x = food_list[i].x;
-			ant->food_y = food_list[i].y;
-
-			head_towards(ant, ant->food_x , ant->food_y);
+			head_towards(ant, food_list[i].x , food_list[i].y);
 			return true;
 		}
 	}
