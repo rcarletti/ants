@@ -18,8 +18,8 @@ RM = rm
 #---------------------------------------------------
 # Dependencies
 #---------------------------------------------------
-$(MAIN) : $(MAIN).o ptask.o
-	$(CC) $(CFLAGS) -o $(MAIN) $(MAIN).o ptask.o $(CLIBS)
+$(MAIN) : $(MAIN).o ptask.o utils.o
+	$(CC) $(CFLAGS) -o $(MAIN) $(MAIN).o ptask.o utils.o $(CLIBS)
 
 $(MAIN).o: $(MAIN).c
 	$(CC) $(CFLAGS) -c $(MAIN).c
@@ -27,6 +27,9 @@ $(MAIN).o: $(MAIN).c
 ptask.o: ptask.c
 	$(CC) $(CFLAGS) -c ptask.c
 
+utils.o: utils.c
+	$(CC) $(CFLAGS) -c utils.c
+
 clean:
-	$(RM) $(MAIN) *.o
+	$(RM) -rf $(MAIN) *.o
 
