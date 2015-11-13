@@ -15,12 +15,12 @@
 
 #define WINDOW_HEIGHT			600
 #define WINDOW_WIDTH			1200
-#define BACKGROUND_WIDTH		0.8
-#define BACKGROUND_HEIGHT		0.6
+#define BACKGROUND_WIDTH		0.8	//[m]
+#define BACKGROUND_HEIGHT		0.6	//[m]
 
 #define FOOD_BASE_ODOR			(FOOD_DETECTION_RADIUS * FOOD_DETECTION_RADIUS)
 
-#define SCALE 					1000.0
+#define SCALE 					1000.0	//fattore di scala che converte metri in pixel
 
 #define MAX_FOOD_NUM			5	//numero massimo di pile di cibo
 #define MAX_FOOD_QUANTITY		10	//numero massimo di cibo per pila
@@ -28,7 +28,7 @@
 
 #define MAX_NUM_ANTS			20		//numero di formiche worker
 #define DELTA_ANGLE				5		//max angle deviation
-#define ANT_PERIOD				0.02
+#define ANT_PERIOD				0.01
 #define ANT_SPEED				0.02 
 #define ANT_RADIUS				0.008
 
@@ -77,7 +77,7 @@ struct ant_t
 	double 	x, y;
 	double 	speed;
 	double	angle;
-	double   pheromone_intensity;
+	double  pheromone_intensity;
 
 	enum state_t state;
 
@@ -188,6 +188,9 @@ struct timespec 	global_t;
 
 int 				deadline_miss_num = 0;			//conta i deadline miss 
 
+pthread_mutex_t		grid_mux = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t		food_mux = PTHREAD_MUTEX_INITIALIZER;
+
 
 //---------------------------------------------------------------------------
 //FUNCTION DEFINITIONS
@@ -257,11 +260,17 @@ int j;
 
 	put_nest();
 
+	pthread_mutex_lock(&food_mux);
+
 	for (j = 0; j < MAX_FOOD_NUM; j++)
 	{
 		food_list[j].x = -1;
 		food_list[j].y = -1;
 	}
+
+	pthread_mutex_unlock(&food_mux);
+
+
 
 	
 }
@@ -275,6 +284,8 @@ void setup_grid()
 {
 int i, j;
 
+	pthread_mutex_lock(&grid_mux);
+
 	for (i = 0; i < X_NUM_CELL; i++)
 		for (j = 0; j < Y_NUM_CELL; j++)
 		{
@@ -282,6 +293,7 @@ int i, j;
 			grid[i][j].y = j * CELL_SIDE + CELL_SIDE / 2;
 			grid[i][j].odor_intensity = 0;
 		}
+	pthread_mutex_unlock(&grid_mux);
 }
 
 
@@ -333,8 +345,8 @@ int i;
 				if(nScouts < MAX_NUM_SCOUTS)	
 				{
 					scouts_tp[nScouts].arg = nScouts;
-					scouts_tp[nScouts].period = 20;
-					scouts_tp[nScouts].deadline = 60;
+					scouts_tp[nScouts].period = ANT_PERIOD * 1000;
+					scouts_tp[nScouts].deadline = ANT_PERIOD * 1000;
 					scouts_tp[nScouts].priority = 10;
 
 					scouts_tid[nScouts] = task_create(scout_task, &scouts_tp[nScouts]);
@@ -350,8 +362,8 @@ int i;
 			if(nAnts < MAX_NUM_ANTS)
 			{
 				tp[nAnts].arg = nAnts;
-				tp[nAnts].period = 20;
-				tp[nAnts].deadline = 40;
+				tp[nAnts].period = ANT_PERIOD * 1000;
+				tp[nAnts].deadline = ANT_PERIOD * 1000;
 				tp[nAnts].priority = 10;
 
 				tid[nAnts] = task_create(ant_task, &tp[nAnts]);
@@ -377,6 +389,8 @@ int i;
 
 	if (should_put_food)
 	{
+		pthread_mutex_lock(&food_mux);
+
 		for (i = 0; i < MAX_FOOD_NUM; i++)
 		{
 			if (food_list[i].quantity == 0)
@@ -388,6 +402,8 @@ int i;
 				break;
 			}
 		}
+
+		pthread_mutex_unlock(&food_mux);
 	}
 }
 
@@ -713,21 +729,26 @@ bool look_for_food(struct ant_t * ant)
 {
 int i;
 
+	pthread_mutex_lock(&food_mux);
+
 	for (i = 0; i < MAX_FOOD_NUM; i++)
 	{
-	double dist = distance(ant->x, ant->y, food_list[i].x, food_list[i].y);
+
+		double dist = distance(ant->x, ant->y, food_list[i].x, food_list[i].y);
 
 		if (food_list[i].quantity > 0 && 
 			dist < (food_list[i].quantity * FOOD_SCALE / 2)
 		   )
 		{			
-			printf("%f\n", food_list[i].quantity * FOOD_SCALE / 2);
+			pthread_mutex_unlock(&food_mux);
 			ant->following_trail = true;
 			ant->carrying_food = true;
 			food_list[i].quantity--;
 
 			return true;
 		}
+
+		pthread_mutex_unlock(&food_mux);
 	}
 
 	return false;
@@ -741,6 +762,8 @@ bool sense_food(struct ant_t * ant)
 {
 	int i;
 
+	pthread_mutex_lock(&food_mux);
+
 	for (i = 0; i < MAX_FOOD_NUM; i++)
 	{
 	double dist = distance(ant->x,ant->y, food_list[i].x, food_list[i].y);
@@ -750,9 +773,12 @@ bool sense_food(struct ant_t * ant)
 		   )
 		{
 			head_towards(ant, food_list[i].x , food_list[i].y);
+			pthread_mutex_unlock(&food_mux);
 			return true;
 		}
 	}
+
+	pthread_mutex_unlock(&food_mux);
 
 	return false;
 }
@@ -799,11 +825,16 @@ struct timespec t;
 	clock_gettime(CLOCK_MONOTONIC, &t);
 
 	if ((t.tv_sec - ant->last_release.tv_sec) > -1)
-	{
+	{	
+		pthread_mutex_lock(&grid_mux);
+
 		if (grid[x][y].odor_intensity < MAX_PHEROMONE_INTENSITY)
 			grid[x][y].odor_intensity += ant->pheromone_intensity;
 
+		pthread_mutex_unlock(&grid_mux);
+
 		ant->last_release = t;
+
 	}
 	
 }
@@ -821,10 +852,14 @@ struct task_par *tp = (struct task_par *) arg;
 
 	while(1)
 	{
+		pthread_mutex_lock(&grid_mux);
+
 		for (i = 0; i < X_NUM_CELL; i++)
 			for (j = 0; j < Y_NUM_CELL; j++)
 				if (grid[i][j].odor_intensity > 0)
 					grid[i][j].odor_intensity -= PHEROMONE_INTENSITY;
+
+		pthread_mutex_unlock(&grid_mux);
 
 		if (deadline_miss(tp)) 
 		{
@@ -865,6 +900,8 @@ double start_angle, curr_diff;
 					if (dx == x && dy == y)
 						continue;
 
+					pthread_mutex_lock(&grid_mux);
+
 					if (grid[dx][dy].odor_intensity > 0)
 					{
 						double angle = angle_towards(ant, grid[dx][dy].x, grid[dx][dy].y);
@@ -878,6 +915,8 @@ double start_angle, curr_diff;
 							ant->following_trail = true;
 						}
 					}
+
+					pthread_mutex_unlock(&grid_mux);
 
 				}
 		}	}
@@ -1012,6 +1051,8 @@ double radius;
 		exit(1);
 	}
 
+	pthread_mutex_lock(&food_mux);
+
 	for (i = 0; i < MAX_FOOD_NUM; i++)
 		if (food_list[i].quantity > 0)
 		{
@@ -1022,6 +1063,8 @@ double radius;
 				(food_list[i].y - radius) * SCALE,
 				radius * 2 * SCALE, radius * 2 * SCALE);	
 		}
+
+	pthread_mutex_unlock(&food_mux);
 			
 				
 }
@@ -1083,11 +1126,15 @@ void draw_pheromone(void)
 int i, j;
 int col = makecol(246, 240, 127);
 
+	pthread_mutex_lock(&grid_mux);
+
 	for (i = 0; i < X_NUM_CELL; i++)
 		for (j = 0; j < Y_NUM_CELL; j++)
 			if (grid[i][j].odor_intensity > 0)
 				circlefill(buffer, grid[i][j].x * SCALE, grid[i][j].y * SCALE, 
 					       (grid[i][j].odor_intensity + 1) / 2, col);
+
+	pthread_mutex_unlock(&grid_mux);
 }
 
 
@@ -1128,12 +1175,12 @@ double angle;
 			if(!scout_list[i].carrying_food)
 			{
 				rotate_sprite(buffer, scout, (scout_list[i].x - ANT_RADIUS)* SCALE, 
-					        (scout_list[i].y - ANT_RADIUS)* SCALE, ftofix(angle));
+					        (scout_list[i].y - ANT_RADIUS) * SCALE, ftofix(angle));
 			}
 			else
 			{
 				rotate_sprite(buffer, scout_food, (scout_list[i].x - ANT_RADIUS)* SCALE, 
-					        (scout_list[i].y - ANT_RADIUS)* SCALE, ftofix(angle));
+					        (scout_list[i].y - ANT_RADIUS) * SCALE, ftofix(angle));
 
 			}
 		}
@@ -1162,6 +1209,8 @@ int last_deadline_text = 330;
 
 	rect(buffer, 900, 260, 1060, 130, blue); 
 
+	pthread_mutex_lock(&food_mux);
+
 	for (i = 0; i < MAX_FOOD_NUM; i++)
 	{
 		if (food_list[i].quantity != 0)
@@ -1171,6 +1220,8 @@ int last_deadline_text = 330;
 		}
 
 	}
+
+	pthread_mutex_unlock(&food_mux);
 
 	textout_ex(buffer, font, "DEADLINE MISS:", 930, 300, red, -1);
 	if (deadline_miss_num == 0)
