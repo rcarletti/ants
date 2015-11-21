@@ -28,14 +28,14 @@
 
 #define MAX_NUM_ANTS			20		//numero di formiche worker
 #define DELTA_ANGLE				5		//max angle deviation
-#define ANT_PERIOD				0.01
+#define ANT_PERIOD				0.02
 #define ANT_SPEED				0.02 
 #define ANT_RADIUS				0.008
 
 #define NEST_RADIUS				0.040
 
 #define MAX_PHEROMONE_INTENSITY 15
-#define PHEROMONE_INTENSITY     3
+#define PHEROMONE_INTENSITY     0.2
 #define PHEROMONE_TASK_PERIOD  	5000
 
 #define CELL_SIDE				0.01
@@ -191,6 +191,8 @@ int 				deadline_miss_num = 0;			//conta i deadline miss
 pthread_mutex_t		grid_mux = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t		food_mux = PTHREAD_MUTEX_INITIALIZER;
 
+int 				ant_inside_nest = 0;
+
 
 //---------------------------------------------------------------------------
 //FUNCTION DEFINITIONS
@@ -244,8 +246,8 @@ int j;
 
 	// creazione thread grafico
 	gfx_tp.arg = 0;
-	gfx_tp.period = 80;
-	gfx_tp.deadline = 80;
+	gfx_tp.period = 60;
+	gfx_tp.deadline = 60;
 	gfx_tp.priority = 10;
 
 	gfx_tid = task_create(gfx_task, &gfx_tp);
@@ -253,7 +255,7 @@ int j;
 	//creazione thread che decrementa i feromoni
 	ph_tp.arg = 0;
 	ph_tp.period = PHEROMONE_TASK_PERIOD;
-	ph_tp.deadline = 80;
+	ph_tp.deadline = PHEROMONE_TASK_PERIOD;
 	ph_tp.priority = 10;
 
 	ph_tid = task_create(pheromone_task, &ph_tp);
@@ -446,18 +448,32 @@ struct timespec awake_after, t;
 
 	set_period(tp);
 
+
 	while(1)
 	{
+		printf("%d\n",ant_inside_nest );
 		switch (ant->state)
 		{
 			case ANT_IDLE:
+			ant_inside_nest++;
+				
 				//la formica è nel nido, aspetta di sentire una traccia
 				if (follow_trail(ant))
 				{
-					clock_gettime(CLOCK_MONOTONIC, &awake_after);
-					time_add_ms(&awake_after, tp->arg * 1000);
+					if (ant_inside_nest != 1)
+					{
+						
+						clock_gettime(CLOCK_MONOTONIC, &awake_after);
+						time_add_ms(&awake_after, tp->arg * 1000);
 
-					ant->state = ANT_AWAKING;
+						ant->state = ANT_AWAKING;
+					}
+
+					else 
+					{
+						ant_inside_nest--;
+						ant->state = ANT_TOWARDS_FOOD;
+					}
 				}
 
 				break;
@@ -471,6 +487,7 @@ struct timespec awake_after, t;
 				if (time_cmp(awake_after, t) < 0)
 				{
 					ant->state = ANT_TOWARDS_FOOD;
+					ant_inside_nest--;
 				}
 
 				break;
@@ -622,6 +639,7 @@ struct timespec awake_after, t;
 		}	
 		wait_for_period(tp);
 	}
+
 } 
 
 //---------------------------------------------------------------------
@@ -649,6 +667,7 @@ struct ant_t * scout = &scout_list[tp->arg];
 	scout->carrying_food = false;
 
 	set_period(tp);
+
 
 	while(1)
 	{
@@ -718,6 +737,8 @@ struct ant_t * scout = &scout_list[tp->arg];
 		}
 		wait_for_period(tp);
 	}
+
+
 }
 
 //---------------------------------------------------------------------
@@ -1199,15 +1220,17 @@ int green = makecol(102, 192, 146);
 int orange = makecol(255, 102, 0);
 int last_deadline_text = 330;
 
-	textout_ex(buffer, font, "TO ADD A SCOUT ANT PRESS S", 830, 25, blue, -1);
-	textout_ex(buffer, font, "TO ADD A WORKER ANT PRESS W", 830, 40, blue, -1);
-	sprintf(buf, "scouts num: %d", nScouts);
-	textout_ex(buffer, font, buf, 830, 55, blue, -1);
-	sprintf(buf, "workers num: %d", nAnts);
-	textout_ex(buffer, font, buf, 830, 70, blue, -1);
-	textout_ex(buffer, font, "FOOD MAP", 950, 115, red, -1);
 
-	rect(buffer, 900, 260, 1060, 130, blue); 
+	textout_ex(buffer, font, "TO ADD FOOD CLICK ON THE ENVIRONMENT", 830, 25, blue, -1);
+	textout_ex(buffer, font, "TO ADD A SCOUT ANT PRESS S", 830, 40, blue, -1);
+	textout_ex(buffer, font, "TO ADD A WORKER ANT PRESS W", 830, 55, blue, -1);
+	sprintf(buf, "scouts num: %d", nScouts);
+	textout_ex(buffer, font, buf, 830, 70, blue, -1);
+	sprintf(buf, "workers num: %d", nAnts);
+	textout_ex(buffer, font, buf, 830, 85, blue, -1);
+	textout_ex(buffer, font, "FOOD MAP", 950, 130, red, -1);
+
+	rect(buffer, 900, 275, 1060, 145, blue); 
 
 	pthread_mutex_lock(&food_mux);
 
