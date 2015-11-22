@@ -73,6 +73,7 @@ struct food_t
 struct ant_t
 {
 	int     type;
+	int 	id;
 
 	double 	x, y;
 	double 	speed;
@@ -144,6 +145,10 @@ bool sense_food(struct ant_t *);
 double angle_towards(struct ant_t *, double, double);
 void head_towards(struct ant_t * , double, double);
 
+bool is_first_in_queue(struct ant_t *);
+void queue_push(struct ant_t *);
+void queue_pop(void);
+
 
 //---------------------------------------------------------------------------
 //GLOBAL VARIABLES
@@ -160,6 +165,9 @@ int 				n_food = 0;
 
 struct ant_t 		ant_list[MAX_NUM_ANTS] = {{0}};
 int 				nAnts = 0;
+struct ant_t *		ant_queue[MAX_NUM_ANTS];
+int 				rear = -1;
+int 				front = 0;
 
 struct nest_t		nest;
 
@@ -192,6 +200,8 @@ pthread_mutex_t		grid_mux = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t		food_mux = PTHREAD_MUTEX_INITIALIZER;
 
 int 				ant_inside_nest = 0;
+
+float 				time_until_next_ant = 1.0;
 
 
 //---------------------------------------------------------------------------
@@ -227,8 +237,6 @@ int j;
 	install_mouse();
 
 	set_color_depth(24);
-
-	set_color_conversion(COLORCONV_8_TO_24);
 
 	set_gfx_mode(GFX_AUTODETECT_WINDOWED, WINDOW_WIDTH, WINDOW_HEIGHT,0,0);
 
@@ -441,6 +449,7 @@ struct timespec awake_after, t;
 	ant->angle = deg_to_rad(frand(0,360));
 	ant->pheromone_intensity = PHEROMONE_INTENSITY;
 	ant->last_release.tv_sec = 0;
+	ant->id = tp->arg;
 
 	ant->inside_nest = true;
 	ant->following_trail = false;
@@ -451,43 +460,15 @@ struct timespec awake_after, t;
 
 	while(1)
 	{
-		printf("%d\n",ant_inside_nest );
+
 		switch (ant->state)
 		{
-			case ANT_IDLE:
-			ant_inside_nest++;
-				
+			case ANT_IDLE:				
 				//la formica è nel nido, aspetta di sentire una traccia
-				if (follow_trail(ant))
+				if (follow_trail(ant) && is_first_in_queue(ant) && (time_until_next_ant -= ANT_PERIOD) < 0)
 				{
-					if (ant_inside_nest != 1)
-					{
-						
-						clock_gettime(CLOCK_MONOTONIC, &awake_after);
-						time_add_ms(&awake_after, tp->arg * 1000);
-
-						ant->state = ANT_AWAKING;
-					}
-
-					else 
-					{
-						ant_inside_nest--;
-						ant->state = ANT_TOWARDS_FOOD;
-					}
-				}
-
-				break;
-
-			case ANT_AWAKING:
-
-				clock_gettime(CLOCK_MONOTONIC, &t);
-
-				//se è passato un tempo sufficiente esce dal nido
-
-				if (time_cmp(awake_after, t) < 0)
-				{
-					ant->state = ANT_TOWARDS_FOOD;
-					ant_inside_nest--;
+					queue_pop();
+					ant->state = ANT_TOWARDS_FOOD;	
 				}
 
 				break;
@@ -525,7 +506,10 @@ struct timespec awake_after, t;
 			{
 				//se la formica è al nido senza cibo, torna in idle
 				if (sense_nest(ant) && check_nest(ant))
+				{
 					ant->state = ANT_IDLE;
+					queue_push(ant);
+				}
 
 				else 
 				{
@@ -574,10 +558,13 @@ struct timespec awake_after, t;
 				if (sense_nest(ant) && check_nest(ant))
 				{
 					ant->carrying_food = false;
-					if(follow_trail(ant))
+					if (follow_trail(ant))
 						ant->state = ANT_TOWARDS_FOOD;
 					else
+					{
 						ant->state = ANT_IDLE;
+						queue_push(ant);
+					}
 				}
 				else if (sense_food(ant) && !ant->carrying_food)
 				{
@@ -600,6 +587,7 @@ struct timespec awake_after, t;
 				{
 					ant->carrying_food = false;
 					ant->state = ANT_IDLE;
+					queue_push(ant);
 				}
 
 				else if (!ant->carrying_food)
@@ -1289,4 +1277,31 @@ int last_deadline_text = 330;
 
 	}
 
+}
+
+void queue_push(struct ant_t * ant)
+{
+	if (front == -1)
+		front = 0;
+	rear = (rear + 1) % MAX_NUM_ANTS;
+	ant_queue[rear] = ant;
+}
+
+void queue_pop()
+{
+	front = (front + 1) % MAX_NUM_ANTS;
+
+	if (rear == front)
+		rear = front = -1;
+}
+
+bool is_first_in_queue(struct ant_t * ant)
+{
+int i;
+	if (ant_queue[front]->id == ant->id)
+	{
+		return true;
+	}
+	printf("false\n");
+	return false;
 }
