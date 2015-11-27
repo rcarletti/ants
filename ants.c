@@ -154,7 +154,15 @@ void queue_pop(void);
 //GLOBAL VARIABLES
 //---------------------------------------------------------------------------
 
-BITMAP *buffer; 			//buffer per il double buffering
+BITMAP * buffer; 			//buffer per il double buffering
+BITMAP * ground;
+BITMAP * nest_image;
+BITMAP * food;
+BITMAP * ant;
+BITMAP * ant_food;
+BITMAP * scout;
+BITMAP * scout_food;
+
 int		mouse_prev = 0;		//valore precedente del mouse
 
 double 				food_x = 0;					//food center coord
@@ -166,8 +174,9 @@ int 				n_food = 0;
 struct ant_t 		ant_list[MAX_NUM_ANTS] = {{0}};
 int 				nAnts = 0;
 struct ant_t *		ant_queue[MAX_NUM_ANTS];
-int 				rear = -1;
+int 				rear = 0;
 int 				front = 0;
+int                 count = 0;
 
 struct nest_t		nest;
 
@@ -198,6 +207,7 @@ int 				deadline_miss_num = 0;			//conta i deadline miss
 
 pthread_mutex_t		grid_mux = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t		food_mux = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t		ant_queue_mux = PTHREAD_MUTEX_INITIALIZER;
 
 int 				ant_inside_nest = 0;
 
@@ -254,8 +264,8 @@ int j;
 
 	// creazione thread grafico
 	gfx_tp.arg = 0;
-	gfx_tp.period = 60;
-	gfx_tp.deadline = 60;
+	gfx_tp.period = 20;
+	gfx_tp.deadline = 50;
 	gfx_tp.priority = 10;
 
 	gfx_tid = task_create(gfx_task, &gfx_tp);
@@ -457,6 +467,8 @@ struct timespec awake_after, t;
 
 	set_period(tp);
 
+	queue_push(ant);
+
 
 	while(1)
 	{
@@ -465,11 +477,16 @@ struct timespec awake_after, t;
 		{
 			case ANT_IDLE:				
 				//la formica è nel nido, aspetta di sentire una traccia
+			pthread_mutex_lock(&ant_queue_mux);
 				if (follow_trail(ant) && is_first_in_queue(ant) && (time_until_next_ant -= ANT_PERIOD) < 0)
 				{
 					queue_pop();
-					ant->state = ANT_TOWARDS_FOOD;	
+					pthread_mutex_unlock(&ant_queue_mux);
+					ant->state = ANT_TOWARDS_FOOD;
+					time_until_next_ant = 1.0;	
 				}
+				else
+					pthread_mutex_unlock(&ant_queue_mux);
 
 				break;
 
@@ -988,10 +1005,6 @@ void * gfx_task(void * arg)
 {
 struct task_par *tp = (struct task_par *) arg;
 
-BITMAP * ground;
-
-BITMAP * nest_image;
-
 	ground = load_bitmap("ground2.bmp", NULL);
 	if(ground == NULL)
 		{
@@ -1005,6 +1018,14 @@ BITMAP * nest_image;
 		printf("errore nest \n");
 		exit(1);
 	}
+
+
+	scout = load_bitmap("scout.bmp", NULL);
+	scout_food = load_bitmap("scout_food.bmp", NULL);
+	ant = load_bitmap("ant.bmp", NULL);
+	ant_food = load_bitmap("ant_food.bmp", NULL);
+	food = load_bitmap("sugar.bmp", NULL);
+
 
 	set_period(tp);
 
@@ -1051,9 +1072,6 @@ void draw_food(void)
 int i;
 double radius;
 
-	BITMAP * food;
-
-	food = load_bitmap("sugar.bmp", NULL);
 	if (food == NULL)
 	{
 		printf("errore food \n");
@@ -1085,19 +1103,13 @@ double radius;
 void draw_ants(void)
 {
 int i;
-BITMAP * ant;
-BITMAP * ant_food;
 double angle;
-
-	ant = load_bitmap("ant.bmp", NULL);
 
 	if (ant == NULL)
 	{
 		printf("errore ant\n");
 		exit(1);
 	}
-
-	ant_food = load_bitmap("ant_food.bmp", NULL);
 
 	if (ant_food == NULL)
 	{
@@ -1154,12 +1166,7 @@ int col = makecol(246, 240, 127);
 void draw_scouts(void)
 {
 int i;
-BITMAP * scout;
-BITMAP * scout_food;
 double angle;
-
-	scout = load_bitmap("scout.bmp", NULL);
-	scout_food = load_bitmap("scout_food.bmp", NULL);
 
 	if (scout == NULL)
 	{
@@ -1281,27 +1288,24 @@ int last_deadline_text = 330;
 
 void queue_push(struct ant_t * ant)
 {
-	if (front == -1)
-		front = 0;
-	rear = (rear + 1) % MAX_NUM_ANTS;
+	if(count == MAX_NUM_ANTS)
+		return;
+
 	ant_queue[rear] = ant;
+	rear = (rear + 1) % MAX_NUM_ANTS;
+	count++;
 }
 
 void queue_pop()
 {
-	front = (front + 1) % MAX_NUM_ANTS;
+	if(count == 0)
+		return;
 
-	if (rear == front)
-		rear = front = -1;
+	front = (front + 1) % MAX_NUM_ANTS;
+	count--;
 }
 
 bool is_first_in_queue(struct ant_t * ant)
 {
-int i;
-	if (ant_queue[front]->id == ant->id)
-	{
-		return true;
-	}
-	printf("false\n");
-	return false;
+	return (ant_queue[front]->id == ant->id);
 }
