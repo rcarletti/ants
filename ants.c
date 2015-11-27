@@ -163,7 +163,7 @@ BITMAP * ant_food;
 BITMAP * scout;
 BITMAP * scout_food;
 
-int		mouse_prev = 0;		//valore precedente del mouse
+int					mouse_prev = 0;		//valore precedente del mouse
 
 double 				food_x = 0;					//food center coord
 double 				food_y = 0;
@@ -220,7 +220,6 @@ float 				time_until_next_ant = 1.0;
 
 int main(int argc, char * argv[])
 {
-
 	setup();
 
 	while (running)
@@ -229,6 +228,9 @@ int main(int argc, char * argv[])
 
 		put_food();
 	}
+	pthread_mutex_destroy(&ant_queue_mux);
+	pthread_mutex_destroy(&food_mux);
+	pthread_mutex_destroy(&grid_mux);
 	allegro_exit();
 	return 0;
 }
@@ -525,7 +527,9 @@ struct timespec awake_after, t;
 				if (sense_nest(ant) && check_nest(ant))
 				{
 					ant->state = ANT_IDLE;
+					pthread_mutex_lock(&ant_queue_mux);
 					queue_push(ant);
+					pthread_mutex_unlock(&ant_queue_mux);
 				}
 
 				else 
@@ -580,7 +584,9 @@ struct timespec awake_after, t;
 					else
 					{
 						ant->state = ANT_IDLE;
+						pthread_mutex_lock(&ant_queue_mux);
 						queue_push(ant);
+						pthread_mutex_unlock(&ant_queue_mux);
 					}
 				}
 				else if (sense_food(ant) && !ant->carrying_food)
@@ -604,7 +610,9 @@ struct timespec awake_after, t;
 				{
 					ant->carrying_food = false;
 					ant->state = ANT_IDLE;
+					pthread_mutex_lock(&ant_queue_mux);
 					queue_push(ant);
+					pthread_mutex_unlock(&ant_queue_mux);
 				}
 
 				else if (!ant->carrying_food)
