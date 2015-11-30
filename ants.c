@@ -86,6 +86,8 @@ struct ant_t
 	bool 	inside_nest;
 
 	struct timespec last_release;
+
+	pthread_mutex_t	ant_mux;
 };
 
 
@@ -208,6 +210,8 @@ int 				deadline_miss_num = 0;			//conta i deadline miss
 pthread_mutex_t		grid_mux = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t		food_mux = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t		ant_queue_mux = PTHREAD_MUTEX_INITIALIZER;
+
+
 
 int 				ant_inside_nest = 0;
 
@@ -457,7 +461,7 @@ struct timespec awake_after, t;
 	ant->state = ANT_IDLE;
 	ant->x = nest.x; 
 	ant->y = nest.y; 
-	ant->speed = ANT_SPEED;
+	ant->speed = ANT_SPEED;	
 	ant->angle = deg_to_rad(frand(0,360));
 	ant->pheromone_intensity = PHEROMONE_INTENSITY;
 	ant->last_release.tv_sec = 0;
@@ -467,14 +471,17 @@ struct timespec awake_after, t;
 	ant->following_trail = false;
 	ant->carrying_food = false;
 
+	pthread_mutex_init(&ant->ant_mux, NULL);
+
 	set_period(tp);
 
 	queue_push(ant);
 
-
+	
 	while(1)
 	{
 
+		pthread_mutex_lock(&ant->ant_mux);
 		switch (ant->state)
 		{
 			case ANT_IDLE:				
@@ -645,6 +652,8 @@ struct timespec awake_after, t;
 			
 		}
 
+		pthread_mutex_unlock(&ant->ant_mux);
+
 		if (deadline_miss(tp))
 		{
 			printf("deadline miss ant\n");
@@ -681,10 +690,12 @@ struct ant_t * scout = &scout_list[tp->arg];
 
 	set_period(tp);
 
+	pthread_mutex_init(&scout->ant_mux, NULL);
+
 
 	while(1)
 	{
-
+		pthread_mutex_lock(&scout->ant_mux);
 		switch (scout->state)
 		{
 			case ANT_RANDOM_MOVEMENT:
@@ -742,6 +753,9 @@ struct ant_t * scout = &scout_list[tp->arg];
 		scout->y += vy * ANT_PERIOD;
 
 		bounce(scout);
+
+		pthread_mutex_unlock(&scout->ant_mux);
+
 
 		if (deadline_miss(tp)) 
 		{
@@ -1127,6 +1141,7 @@ double angle;
 
 	for (i = 0; i < MAX_NUM_ANTS; i++)
 		{
+			pthread_mutex_lock(&ant_list[i].ant_mux);
 			if (ant_list[i].state != ANT_IDLE && ant_list[i].state!= ANT_AWAKING)
 			{
 				//converting degrees in allegro-degrees
@@ -1139,6 +1154,7 @@ double angle;
 					rotate_sprite(buffer, ant_food, (ant_list[i].x - ANT_RADIUS) * SCALE, 
 					              (ant_list[i].y - ANT_RADIUS) * SCALE, ftofix(angle));
 			}
+			pthread_mutex_unlock(&ant_list[i].ant_mux);
 
 
 		}
@@ -1190,6 +1206,7 @@ double angle;
 
 	for (i = 0; i < nScouts; i++)
 	{
+		pthread_mutex_lock(&scout_list[i].ant_mux);
 		if(scout_list[i].state != ANT_IDLE)
 		{
 			//converting degrees in allegro-degrees
@@ -1208,6 +1225,7 @@ double angle;
 
 			}
 		}
+		pthread_mutex_unlock(&scout_list[i].ant_mux);
 	}
 }
 
