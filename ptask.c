@@ -57,7 +57,6 @@ struct timespec now;
 	if (time_cmp(now, tp->dl) > 0) 
 	{
 		tp->dmiss++;
-		printf("%ld\n", (tp->dl.tv_nsec - now.tv_nsec)/1000000);
 		return 1;
 	}
 	return 0;
