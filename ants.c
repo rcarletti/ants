@@ -808,6 +808,8 @@ int i;
 			ant->following_trail = true;
 			ant->carrying_food = true;
 			food_list[i].quantity--;
+			if(food_list[i].quantity == 0)
+				n_food--;
 
 			return true;
 		}
@@ -1225,8 +1227,8 @@ int last_deadline_text = 330;
 	textout_ex(buffer, font, "TO ADD A SCOUT ANT PRESS S", 830, 40, blue, -1);
 	textout_ex(buffer, font, "TO ADD A WORKER ANT PRESS W", 830, 55, blue, -1);
 	textout_ex(buffer, font, "TO DELETE PHEROMONES PRESS SPACEBAR", 830, 70, blue, -1);
-	textout_ex(buffer, font, "TO INCREASE PHEROMONE DECAY PRESS SPACEBAR", 830, 95, blue, -1);
-	textout_ex(buffer, font, "TO DECREASE PHEROMONE DECAY PRESS SPACEBAR", 830, 110, blue, -1);
+	textout_ex(buffer, font, "TO INCREASE PHEROMONE DECAY PRESS UP ARROW", 830, 95, blue, -1);
+	textout_ex(buffer, font, "TO DECREASE PHEROMONE DECAY PRESS DOWN ARROW", 830, 110, blue, -1);
 	sprintf(buf, "scouts num: %d", nScouts);
 	textout_ex(buffer, font, buf, 830, 125, blue, -1);
 	sprintf(buf, "workers num: %d", nAnts);
