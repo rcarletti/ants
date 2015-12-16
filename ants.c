@@ -15,20 +15,21 @@
 #define WINDOW_WIDTH			1200
 #define BACKGROUND_WIDTH		0.8	//[m]
 #define BACKGROUND_HEIGHT		0.6	//[m]
+#define SCALE 					1000.0	//scale factor
 
 #define FOOD_BASE_ODOR			(FOOD_DETECTION_RADIUS * FOOD_DETECTION_RADIUS)
-
-#define SCALE 					1000.0	//scale factor
 
 #define MAX_FOOD_NUM			5	//max n. of food piles
 #define MAX_FOOD_QUANTITY		10	//max n. of units per food
 #define FOOD_SCALE              0.008   //radius = quantity * scale	
 
-#define MAX_NUM_WORKER			100		//max n. of workers
+#define MAX_NUM_WORKER			100		
+#define	MAX_NUM_SCOUTS			100
 #define DELTA_ANGLE				5		//max angle deviation
-#define ANT_PERIOD				0.02
 #define ANT_SPEED				0.02 
 #define ANT_RADIUS				0.008
+
+#define ANT_PERIOD				0.02
 
 #define NEST_RADIUS				0.040
 
@@ -39,8 +40,6 @@
 #define CELL_SIDE				0.01
 #define X_NUM_CELL				80
 #define Y_NUM_CELL				60
-
-#define	MAX_NUM_SCOUTS			100
 
 #define ANT_TYPE_SCOUT          0
 #define ANT_TYPE_WORKER         1
@@ -283,7 +282,7 @@ int j, i;
 
 	// creating graphic thread
 	gfx_tp.arg = 0;
-	gfx_tp.period = 20;
+	gfx_tp.period = 60;
 	gfx_tp.deadline = 50;
 	gfx_tp.priority = 10;
 
@@ -1220,7 +1219,7 @@ int blue = makecol(217, 241, 247);
 int red = makecol(247, 91, 137);
 int green = makecol(102, 192, 146);
 int orange = makecol(255, 102, 0);
-int last_deadline_text = 330;
+int last_deadline_text = 430;
 
 
 	textout_ex(buffer, font, "TO ADD FOOD CLICK ON THE ENVIRONMENT", 830, 25, blue, -1);
@@ -1235,9 +1234,12 @@ int last_deadline_text = 330;
 	textout_ex(buffer, font, buf, 830, 140, blue, -1);
 	sprintf(buf, "pheromone decay: %.1f", pheromone_decay);
 	textout_ex(buffer, font, buf, 830, 155, blue, -1);
-	textout_ex(buffer, font, "FOOD MAP", 950, 180, red, -1);
+	textout_ex(buffer, font, "TO DELETE AN ANT HOLD THE RIGHT MOUSE BUTTON", 830, 180, blue, -1);
+	textout_ex(buffer, font, "AND DRAG THE RECTANGLE AROUND THE ANTS", 830, 195, blue, -1);
+	textout_ex(buffer, font, "YOU WANT TO DELETE", 830, 210, blue, -1);
+	textout_ex(buffer, font, "FOOD MAP", 950, 230, red, -1);
 
-	rect(buffer, 900, 320, 1060, 200, blue); 
+	rect(buffer, 900, 370, 1060, 250, blue); 
 
 	pthread_mutex_lock(&food_mux);
 
@@ -1250,17 +1252,17 @@ int last_deadline_text = 330;
 			sprintf(buf, "%d", food_list[i].quantity);
 			width = text_length(font, buf);
 
-			textout_ex(buffer, font, buf, (food_list[i].x / 5 * SCALE) + 900 - width / 2, (food_list[i].y / 5 * SCALE) + 200, blue, -1);
+			textout_ex(buffer, font, buf, (food_list[i].x / 5 * SCALE) + 900 - width / 2, (food_list[i].y / 5 * SCALE) + 250, blue, -1);
 		}
 
 	}
 
 	pthread_mutex_unlock(&food_mux);
 
-	textout_ex(buffer, font, "DEADLINE MISS:", 930, 330, red, -1);
+	textout_ex(buffer, font, "DEADLINE MISS:", 930, 400, red, -1);
 	if (deadline_miss_num == 0)
 	{
-		textout_ex(buffer, font, "no deadline miss (yet)", 900, 350, green, -1);
+		textout_ex(buffer, font, "no deadline miss (yet)", 900, 415, green, -1);
 	}
 	else
 	{
