@@ -80,5 +80,7 @@ pthread_t			tid;
 
 	pthread_attr_destroy(&myatt);
 
+	pthread_detach(tid);
+
 	return tid;
 }

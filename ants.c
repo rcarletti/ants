@@ -26,7 +26,7 @@
 
 #define MAX_NUM_WORKER			100		//max n. of workers
 #define DELTA_ANGLE				5		//max angle deviation
-#define ANT_PERIOD				0.01
+#define ANT_PERIOD				0.02
 #define ANT_SPEED				0.02 
 #define ANT_RADIUS				0.008
 
@@ -81,7 +81,7 @@ struct ant_t
 	bool 	carrying_food, following_trail;
 	bool 	inside_nest;
 
-	struct timespec last_release;
+	bool 	present;
 
 	pthread_mutex_t	ant_mux;
 };
@@ -98,6 +98,12 @@ struct cell_t
 	double x;			//center of the cell
 	double y;
 	double odor_intensity;
+};
+
+struct rect_t
+{
+	double x1, y1; 		//up-left corner
+	double x2, y2;		//down-right corner
 };
 
 //---------------------------------------------------------------------------
@@ -147,6 +153,9 @@ bool is_first_in_queue(struct ant_t *);
 void queue_push(struct ant_t *);
 void queue_pop(void);
 
+void delete_pheromone(void);
+void delete_ants(void);
+
 
 //---------------------------------------------------------------------------
 //GLOBAL VARIABLES
@@ -162,6 +171,7 @@ BITMAP * scout;
 BITMAP * scout_food;
 
 int					mouse_prev = 0;		
+int 				mouse_prev_right = 0;
 
 double 				food_x = 0;					//food center coordinates
 double 				food_y = 0;
@@ -169,7 +179,7 @@ bool 				should_put_food = false;
 struct food_t 		food_list[MAX_FOOD_NUM] = {{0}};		
 int 				n_food = 0;
 
-struct ant_t 		ant_list[MAX_NUM_WORKER] = {{0}};
+struct ant_t 		ant_list[MAX_NUM_WORKER];
 int 				nAnts = 0;
 struct ant_t *		ant_queue[MAX_NUM_WORKER];
 int 				rear = 0;
@@ -210,6 +220,9 @@ pthread_mutex_t		ant_queue_mux = PTHREAD_MUTEX_INITIALIZER;
 int 				ant_inside_nest = 0;
 
 float 				time_until_next_ant = 1.0;
+float 				pheromone_decay = 0.2;
+
+struct rect_t		delete_rect;
 
 
 //---------------------------------------------------------------------------
@@ -244,7 +257,8 @@ int i;
 
 void setup(void)
 {
-int j;
+int j, i;
+
 	//allegro setup
 
 	allegro_init();
@@ -293,6 +307,11 @@ int j;
 		food_list[j].y = -1;
 	}
 	pthread_mutex_unlock(&food_mux);	
+
+	for(i = 0; i < MAX_NUM_WORKER; i++)
+		ant_list[i].present = false;
+	for(i = 0; i < MAX_NUM_SCOUTS; i++)
+		scout_list[i].present = false;
 }
 
 //---------------------------------------------------------------------
@@ -334,7 +353,8 @@ void put_nest(void)
 void process_inputs(void)
 {
 char	  scan;
-const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
+int       i;
+const double FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 
 	// save mouse coordinates
 	food_x = (double)mouse_x / SCALE;
@@ -349,6 +369,8 @@ const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 
 	mouse_prev = mouse_b;
 
+	delete_ants();
+
 	// keyboard input
 	scan = get_scan_code();
 
@@ -359,34 +381,55 @@ const int FOOD_BASE_RADIUS = MAX_FOOD_QUANTITY * FOOD_SCALE;
 			break;
 		case KEY_S:
 		{		//creating scout thread
-			if(nScouts < MAX_NUM_SCOUTS)	
+			for(i = 0; i < MAX_NUM_SCOUTS; i++)
 			{
-				scouts_tp[nScouts].arg = nScouts;
-				scouts_tp[nScouts].period = ANT_PERIOD * 1000;
-				scouts_tp[nScouts].deadline = ANT_PERIOD * 1000;
-				scouts_tp[nScouts].priority = 10;
-
-				scouts_tid[nScouts] = task_create(scout_task, &scouts_tp[nScouts]);
-
-				nScouts++;
+				if(scout_list[i].present == false)	
+				{
+					scouts_tp[i].arg = i;
+					scouts_tp[i].period = ANT_PERIOD * 1000;
+					scouts_tp[i].deadline = ANT_PERIOD * 1000;
+					scouts_tp[i].priority = 10;
+					scouts_tid[i] = task_create(scout_task, &scouts_tp[i]);
+					nScouts++;
+					break;
+				}
 			}
-		break;
+			break;
 		}
 
 		case KEY_W:
 		{
-			if(nAnts < MAX_NUM_WORKER)
+			for(i = 0; i < MAX_NUM_WORKER; i++)
 			{	//creating worker thread
-				tp[nAnts].arg = nAnts;
-				tp[nAnts].period = ANT_PERIOD * 1000;
-				tp[nAnts].deadline = ANT_PERIOD * 1000;
-				tp[nAnts].priority = 10;
-
-				tid[nAnts] = task_create(worker_task, &tp[nAnts]);
-
-				nAnts++;	
+				if(ant_list[i].present == false)
+				{
+					tp[i].arg = i;
+					tp[i].period = ANT_PERIOD * 1000;
+					tp[i].deadline = ANT_PERIOD * 1000;
+					tp[i].priority = 10;
+					tid[i] = task_create(worker_task, &tp[i]);
+					nAnts++;	
+					break;
+				}
 			}
-		break;
+			break;
+		}
+
+		case KEY_SPACE:
+		{
+			delete_pheromone();
+			break; 
+		}
+
+		case KEY_UP:
+		{
+			pheromone_decay += 0.2;
+			break;
+		}
+		case KEY_DOWN:
+		{
+			pheromone_decay -= 0.2;
+			break;
 		}
 		default: 
 			break;
@@ -445,11 +488,11 @@ struct ant_t * ant = &ant_list[tp->arg];
 
 	ant->type = ANT_TYPE_WORKER;
 	ant->state = ANT_IDLE;
+	ant->present = true;
 	ant->x = nest.x; 
 	ant->y = nest.y; 
 	ant->speed = ANT_SPEED;	
 	ant->angle = deg_to_rad(frand(0,360));
-	ant->last_release.tv_sec = 0;
 	ant->id = tp->arg;
 	ant->inside_nest = true;
 	ant->following_trail = false;
@@ -460,11 +503,20 @@ struct ant_t * ant = &ant_list[tp->arg];
 	set_period(tp);
 
 	queue_push(ant);
-
 	
 	while(1)
 	{
 		pthread_mutex_lock(&ant->ant_mux);
+
+		if(!ant->present)
+		{
+			pthread_mutex_unlock(&ant->ant_mux);
+			break;
+		}
+
+		if(!ant->present)
+			break;
+
 		switch (ant->state)
 		{
 			case ANT_IDLE:				
@@ -625,6 +677,8 @@ struct ant_t * ant = &ant_list[tp->arg];
 		}	
 		wait_for_period(tp);
 	}
+
+	return 0;
 } 
 
 //---------------------------------------------------------------------
@@ -639,6 +693,7 @@ struct task_par * tp = (struct task_par *) arg;
 struct ant_t * scout = &scout_list[tp->arg];
 
 	scout->type = ANT_TYPE_SCOUT;
+	scout->present = true;
 	scout->x = nest.x; 
 	scout->y = nest.y; 
 	scout->speed = ANT_SPEED;
@@ -654,6 +709,13 @@ struct ant_t * scout = &scout_list[tp->arg];
 	while(1)
 	{
 		pthread_mutex_lock(&scout->ant_mux);
+
+		if(!scout->present)
+		{
+			pthread_mutex_unlock(&scout->ant_mux);
+			break;
+		}
+
 		switch (scout->state)
 		{
 			case ANT_RANDOM_MOVEMENT:
@@ -719,6 +781,8 @@ struct ant_t * scout = &scout_list[tp->arg];
 		}
 		wait_for_period(tp);
 	}
+
+	return 0;
 }
 
 //---------------------------------------------------------------------
@@ -844,7 +908,7 @@ struct task_par *tp = (struct task_par *) arg;
 		for (i = 0; i < X_NUM_CELL; i++)
 			for (j = 0; j < Y_NUM_CELL; j++)
 				if (grid[i][j].odor_intensity > 0)
-					grid[i][j].odor_intensity -= PHEROMONE_INTENSITY;
+					grid[i][j].odor_intensity -= pheromone_decay;
 
 		pthread_mutex_unlock(&grid_mux);
 
@@ -960,6 +1024,7 @@ void head_towards(struct ant_t * ant, double x, double y)
 void * gfx_task(void * arg)
 {
 struct task_par *tp = (struct task_par *) arg;
+int blue = makecol(217, 241, 247);
 
 	scout = load_bitmap("scout.bmp", NULL);
 	scout_food = load_bitmap("scout_food.bmp", NULL);
@@ -1035,6 +1100,9 @@ struct task_par *tp = (struct task_par *) arg;
 
 		draw_interface();
 
+		if(mouse_b & 2)
+			rect(buffer, delete_rect.x1 * SCALE, delete_rect.y1 * SCALE, mouse_x, mouse_y, blue);	
+
 		blit(buffer, screen, 0, 0, 0, 0, buffer->w, buffer->h);
 
 		unscare_mouse();
@@ -1079,7 +1147,7 @@ double angle;
 	for (i = 0; i < MAX_NUM_WORKER; i++)
 	{
 		pthread_mutex_lock(&ant_list[i].ant_mux);
-		if (ant_list[i].state != ANT_IDLE )
+		if (ant_list[i].state != ANT_IDLE && ant_list[i].present)
 		{
 			//converting degrees in allegro-degrees
 			angle = ((rad_to_deg(ant_list[i].angle + M_PI_2) * 256 / 360));
@@ -1117,10 +1185,10 @@ int i;
 double angle;
 
 
-	for (i = 0; i < nScouts; i++)
+	for (i = 0; i < MAX_NUM_SCOUTS; i++)
 	{
 		pthread_mutex_lock(&scout_list[i].ant_mux);
-		if(scout_list[i].state != ANT_IDLE)
+		if(scout_list[i].state != ANT_IDLE && scout_list[i].present)
 		{
 			//converting degrees in allegro-degrees
 
@@ -1156,13 +1224,18 @@ int last_deadline_text = 330;
 	textout_ex(buffer, font, "TO ADD FOOD CLICK ON THE ENVIRONMENT", 830, 25, blue, -1);
 	textout_ex(buffer, font, "TO ADD A SCOUT ANT PRESS S", 830, 40, blue, -1);
 	textout_ex(buffer, font, "TO ADD A WORKER ANT PRESS W", 830, 55, blue, -1);
+	textout_ex(buffer, font, "TO DELETE PHEROMONES PRESS SPACEBAR", 830, 70, blue, -1);
+	textout_ex(buffer, font, "TO INCREASE PHEROMONE DECAY PRESS SPACEBAR", 830, 95, blue, -1);
+	textout_ex(buffer, font, "TO DECREASE PHEROMONE DECAY PRESS SPACEBAR", 830, 110, blue, -1);
 	sprintf(buf, "scouts num: %d", nScouts);
-	textout_ex(buffer, font, buf, 830, 70, blue, -1);
+	textout_ex(buffer, font, buf, 830, 125, blue, -1);
 	sprintf(buf, "workers num: %d", nAnts);
-	textout_ex(buffer, font, buf, 830, 85, blue, -1);
-	textout_ex(buffer, font, "FOOD MAP", 950, 130, red, -1);
+	textout_ex(buffer, font, buf, 830, 140, blue, -1);
+	sprintf(buf, "pheromone decay: %.1f", pheromone_decay);
+	textout_ex(buffer, font, buf, 830, 155, blue, -1);
+	textout_ex(buffer, font, "FOOD MAP", 950, 180, red, -1);
 
-	rect(buffer, 900, 275, 1060, 145, blue); 
+	rect(buffer, 900, 320, 1060, 200, blue); 
 
 	pthread_mutex_lock(&food_mux);
 
@@ -1170,18 +1243,22 @@ int last_deadline_text = 330;
 	{
 		if (food_list[i].quantity != 0)
 		{
+			int width;
+
 			sprintf(buf, "%d", food_list[i].quantity);
-			textout_ex(buffer, font, buf, (food_list[i].x / 5 * SCALE) + 900, (food_list[i].y / 5 * SCALE) + 130, blue, -1);
+			width = text_length(font, buf);
+
+			textout_ex(buffer, font, buf, (food_list[i].x / 5 * SCALE) + 900 - width / 2, (food_list[i].y / 5 * SCALE) + 200, blue, -1);
 		}
 
 	}
 
 	pthread_mutex_unlock(&food_mux);
 
-	textout_ex(buffer, font, "DEADLINE MISS:", 930, 300, red, -1);
+	textout_ex(buffer, font, "DEADLINE MISS:", 930, 330, red, -1);
 	if (deadline_miss_num == 0)
 	{
-		textout_ex(buffer, font, "no deadline miss (yet)", 900, 330, green, -1);
+		textout_ex(buffer, font, "no deadline miss (yet)", 900, 350, green, -1);
 	}
 	else
 	{
@@ -1249,4 +1326,54 @@ void queue_pop()
 bool is_first_in_queue(struct ant_t * ant)
 {
 	return (ant_queue[front]->id == ant->id);
+}
+
+void delete_pheromone()
+{
+int i, j;
+for (i = 0; i < X_NUM_CELL; i++)
+	for (j = 0; j < Y_NUM_CELL; j++)
+		if (grid[i][j].odor_intensity > 0)
+			grid[i][j].odor_intensity = 0;
+}
+
+static bool in_rectangle(struct ant_t * ant, struct rect_t * rect)
+{
+	bool x = (ant->x >= fmin(rect->x1, rect->x2)) && (ant->x <= fmax(rect->x1, rect->x2));
+	bool y = (ant->y >= fmin(rect->y1, rect->y2)) && (ant->y <= fmax(rect->y1, rect->y2));
+	return x && y;
+}
+
+void delete_ants()
+{
+int i;
+	if ((mouse_b & 2) && (!(mouse_prev_right & 2)))
+	{
+		delete_rect.x1 = (mouse_x / SCALE);
+		delete_rect.y1 = (mouse_y / SCALE);		
+	}
+	if (!(mouse_b & 2) && (mouse_prev_right & 2))
+	{
+		delete_rect.x2 = (mouse_x / SCALE);
+		delete_rect.y2 = (mouse_y / SCALE);
+
+		for (i = 0; i < MAX_NUM_WORKER; i++)
+		{
+			if (ant_list[i].present && in_rectangle(&ant_list[i], &delete_rect))
+			{
+				ant_list[i].present = false;
+				nAnts--;
+			}
+		}
+
+		for (i = 0; i < MAX_NUM_SCOUTS; i++)
+		{
+			if (scout_list[i].present && in_rectangle(&scout_list[i], &delete_rect))
+			{
+				scout_list[i].present = false;
+				nScouts--;	
+			}
+		}
+	}
+	mouse_prev_right = mouse_b;	
 }
